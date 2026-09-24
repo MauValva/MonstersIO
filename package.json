@@ -1,0 +1,19 @@
+{
+  "name": "monster-io-pixi",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build --base ./",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "pixi.js": "^8.14.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.4",
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}

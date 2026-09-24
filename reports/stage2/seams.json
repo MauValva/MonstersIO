@@ -1,0 +1,35 @@
+[
+  {
+    "frame": 0,
+    "before": {
+      "horizontal": 14.215384615384615,
+      "vertical": 0.0547008547008547
+    },
+    "after": {
+      "horizontal": 13.91965811965812,
+      "vertical": 0.05982905982905983
+    }
+  },
+  {
+    "frame": 1,
+    "before": {
+      "horizontal": 81.09401709401709,
+      "vertical": 5.576068376068376
+    },
+    "after": {
+      "horizontal": 79.28034188034188,
+      "vertical": 5.478632478632479
+    }
+  },
+  {
+    "frame": 2,
+    "before": {
+      "horizontal": 11.14017094017094,
+      "vertical": 7.092307692307692
+    },
+    "after": {
+      "horizontal": 10.842735042735043,
+      "vertical": 6.9914529914529915
+    }
+  }
+]

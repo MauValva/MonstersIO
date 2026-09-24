@@ -1,0 +1,67 @@
+{
+  "before": {
+    "build": 13583544,
+    "images": 12954265,
+    "gpuBytes": 54705604
+  },
+  "stages": [
+    {
+      "name": "Antes da etapa 2",
+      "build": 13583544,
+      "gpu": 54705604
+    },
+    {
+      "name": "Depois dos 4 assets",
+      "build": 8413278,
+      "gpu": 32795620
+    },
+    {
+      "name": "Depois dos ovos",
+      "build": 7472081,
+      "gpu": 28201628
+    },
+    {
+      "name": "Depois do chão",
+      "build": 6874758,
+      "gpu": 25106588
+    }
+  ],
+  "after": {
+    "build": 6875777,
+    "images": 6245233,
+    "gpuBytes": 25106588,
+    "bootImageBytes": 5040826,
+    "bootImageCount": 9,
+    "bootGpuBytes": 18240512
+  },
+  "savings": {
+    "buildBytes": 6707767,
+    "buildFraction": 0.4938156787359764,
+    "gpuBytes": 29599016,
+    "gpuFraction": 0.5410600347269724
+  },
+  "webp": {
+    "pngBytes": 2514520,
+    "webpBytes": 1855106,
+    "savedBytes": 659414
+  },
+  "cloud": {
+    "path": "public/assets/Arts/Player/PlayerCloud.png",
+    "format": "raw",
+    "width": 512,
+    "height": 256,
+    "channels": 4,
+    "depth": "uchar",
+    "premultiplied": false,
+    "hasAlpha": true,
+    "size": 524288,
+    "bounds": {
+      "x": 44,
+      "y": 0,
+      "width": 424,
+      "height": 256
+    },
+    "transparentPixels": 50441,
+    "partialAlphaPixels": 2157
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "path": "public/assets/Arts/Player/PlayerCloud.png",
+  "format": "raw",
+  "width": 512,
+  "height": 256,
+  "channels": 4,
+  "depth": "uchar",
+  "premultiplied": false,
+  "hasAlpha": true,
+  "size": 524288,
+  "bounds": {
+    "x": 44,
+    "y": 0,
+    "width": 424,
+    "height": 256
+  },
+  "transparentPixels": 50441,
+  "partialAlphaPixels": 2157
+}

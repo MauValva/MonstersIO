@@ -1,0 +1,199 @@
+﻿[
+    {
+        "path":  "public/assets/Arts/README.md",
+        "bytes":  426,
+        "sha256":  "8D0B843F216C9AF70C92574516AEA7F3210C46B5FBE8ADBE5804A3D9EE62D8E7"
+    },
+    {
+        "path":  "public/assets/Arts/Eggs/spr_Eggs.png",
+        "bytes":  1359504,
+        "sha256":  "3A046E45E5498CF463DEF9AA784CD7345AF90E39A9DCE77EDE746B68BA02C906",
+        "width":  1774,
+        "height":  887,
+        "gpuBytes":  6294152,
+        "transparentPixels":  761601,
+        "partialAlphaPixels":  811812,
+        "contentBounds":  [
+                              146,
+                              6,
+                              1774,
+                              887
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Enemy/Enemies.png",
+        "bytes":  1548753,
+        "sha256":  "04BBA79C57AA23D3C70F3BAC222C76C5FCC3E27FC967A75D8E5A5E12B2084E3E",
+        "width":  1774,
+        "height":  887,
+        "gpuBytes":  6294152,
+        "transparentPixels":  341542,
+        "partialAlphaPixels":  1230295,
+        "contentBounds":  [
+                              0,
+                              0,
+                              1774,
+                              887
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Environment/enemyNest.png",
+        "bytes":  2317150,
+        "sha256":  "F5E1E20311B0DC07D352227FE40A3649CB281E4B6B31772F0FAFA47E0C45FA4B",
+        "width":  1774,
+        "height":  887,
+        "gpuBytes":  6294152,
+        "transparentPixels":  406702,
+        "partialAlphaPixels":  1165929,
+        "contentBounds":  [
+                              0,
+                              0,
+                              1774,
+                              887
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Environment/Ground.jpg",
+        "bytes":  105519,
+        "sha256":  "865F1BD476CEFEEE34EF672215A49261789C5A18391C8448F9169396A28172AA",
+        "width":  1254,
+        "height":  1254,
+        "gpuBytes":  6290064,
+        "transparentPixels":  0,
+        "partialAlphaPixels":  0,
+        "contentBounds":  [
+                              0,
+                              0,
+                              1254,
+                              1254
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Environment/Nest_Player.png",
+        "bytes":  130486,
+        "sha256":  "F916C51D599F7C3D22A5B1F598C4B5CD5690A94D3381E7CF3466623AB60998C4",
+        "width":  256,
+        "height":  256,
+        "gpuBytes":  262144,
+        "transparentPixels":  15324,
+        "partialAlphaPixels":  49945,
+        "contentBounds":  [
+                              0,
+                              25,
+                              256,
+                              256
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Environment/Plant.png",
+        "bytes":  872453,
+        "sha256":  "A82B118865BF8E9E7970D3FD3B40C358252A3017CD92F588CFA28CB4B4BF168C",
+        "width":  1322,
+        "height":  1190,
+        "gpuBytes":  6292720,
+        "transparentPixels":  799323,
+        "partialAlphaPixels":  772521,
+        "contentBounds":  [
+                              35,
+                              39,
+                              1302,
+                              1190
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Environment/Tile_Ground_V2.png",
+        "bytes":  1647895,
+        "sha256":  "722B23ECC75EE04358C08795510BEBDE9387D78A3518F2E3768EC7671209C301",
+        "width":  2172,
+        "height":  724,
+        "gpuBytes":  6290112,
+        "transparentPixels":  0,
+        "partialAlphaPixels":  0,
+        "contentBounds":  [
+                              0,
+                              0,
+                              2172,
+                              724
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Environment/UpgradeBase.png",
+        "bytes":  1477797,
+        "sha256":  "B8CB328687EEEC04B1928402435BF5F4C89A35FC824AC1093B69C274559093EB",
+        "width":  1269,
+        "height":  1240,
+        "gpuBytes":  6294240,
+        "transparentPixels":  770146,
+        "partialAlphaPixels":  802677,
+        "contentBounds":  [
+                              91,
+                              0,
+                              1206,
+                              1222
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Player/PlayerCloud.png",
+        "bytes":  118014,
+        "sha256":  "CE5A701A1FB0D230C7133DDB2B522A9B7FEEB2C02210B72BD975BBE7B3B9E2F4",
+        "width":  512,
+        "height":  256,
+        "gpuBytes":  524288,
+        "transparentPixels":  122625,
+        "partialAlphaPixels":  577,
+        "contentBounds":  [
+                              14,
+                              0,
+                              150,
+                              82
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Player/Player_EvoMonster.png",
+        "bytes":  2333710,
+        "sha256":  "7362A622D57CDCCF4272CDBD98E2F7A48F0A6EDF43F67376E8A137DC5E081B28",
+        "width":  2095,
+        "height":  1080,
+        "gpuBytes":  9050400,
+        "transparentPixels":  1553001,
+        "partialAlphaPixels":  709104,
+        "contentBounds":  [
+                              14,
+                              157,
+                              2095,
+                              1080
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/UI/UI_HUD.png",
+        "bytes":  124839,
+        "sha256":  "E3F11DE7A4E0F742598102DF6881A700C60AB03D4D761618EF7C69670E01AB6D",
+        "width":  644,
+        "height":  318,
+        "gpuBytes":  819168,
+        "transparentPixels":  152577,
+        "partialAlphaPixels":  6792,
+        "contentBounds":  [
+                              4,
+                              54,
+                              644,
+                              318
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/UI/UI_Upgrades.png",
+        "bytes":  1023664,
+        "sha256":  "F98953C87BDB8C180049110D1A48EB68049797A461EB394D8A9FADE84868FF7D",
+        "width":  1983,
+        "height":  793,
+        "gpuBytes":  6290076,
+        "transparentPixels":  784977,
+        "partialAlphaPixels":  783944,
+        "contentBounds":  [
+                              0,
+                              64,
+                              1963,
+                              770
+                          ]
+    }
+]

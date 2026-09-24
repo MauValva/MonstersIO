@@ -1,0 +1,471 @@
+{
+  "enemy": {
+    "key": "enemy",
+    "source": "Enemy/Enemies.png",
+    "columns": 2,
+    "rows": 1,
+    "frameWidth": 256,
+    "frameHeight": 256,
+    "padding": 2,
+    "display": [
+      166,
+      166
+    ],
+    "sourcePath": "public/assets/Arts/Enemy/Enemies.png",
+    "outputPath": "public/assets/Optimized/Enemies.png",
+    "webpPath": "reports/stage2/comparisons/Enemies.webp",
+    "comparisonPath": "reports/stage2/comparisons/enemy.png",
+    "originalWidth": 1774,
+    "originalHeight": 887,
+    "originalBytes": 1548753,
+    "originalHash": "04BBA79C57AA23D3C70F3BAC222C76C5FCC3E27FC967A75D8E5A5E12B2084E3E",
+    "width": 520,
+    "height": 260,
+    "frames": [
+      {
+        "x": 2,
+        "y": 2,
+        "width": 256,
+        "height": 256,
+        "sourceBounds": {
+          "left": 0,
+          "top": 0,
+          "right": 887,
+          "bottom": 887
+        }
+      },
+      {
+        "x": 262,
+        "y": 2,
+        "width": 256,
+        "height": 256,
+        "sourceBounds": {
+          "left": 887,
+          "top": 0,
+          "right": 1774,
+          "bottom": 887
+        }
+      }
+    ],
+    "pngBytes": 177870,
+    "webpBytes": 132944,
+    "visibleDifferences": 0,
+    "alphaDifferences": 0,
+    "maxDisplayMeanAbsoluteError": 0.8529902743504137
+  },
+  "plant": {
+    "key": "plant",
+    "source": "Environment/Plant.png",
+    "columns": 1,
+    "rows": 1,
+    "frameWidth": 512,
+    "frameHeight": 461,
+    "padding": 0,
+    "display": [
+      348,
+      348
+    ],
+    "sourcePath": "public/assets/Arts/Environment/Plant.png",
+    "outputPath": "public/assets/Optimized/Plant.png",
+    "webpPath": "reports/stage2/comparisons/Plant.webp",
+    "comparisonPath": "reports/stage2/comparisons/plant.png",
+    "originalWidth": 1322,
+    "originalHeight": 1190,
+    "originalBytes": 872453,
+    "originalHash": "A82B118865BF8E9E7970D3FD3B40C358252A3017CD92F588CFA28CB4B4BF168C",
+    "width": 512,
+    "height": 461,
+    "frames": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 512,
+        "height": 461,
+        "sourceBounds": {
+          "left": 0,
+          "top": 0,
+          "right": 1322,
+          "bottom": 1190
+        }
+      }
+    ],
+    "pngBytes": 168387,
+    "webpBytes": 117894,
+    "visibleDifferences": 0,
+    "alphaDifferences": 0,
+    "maxDisplayMeanAbsoluteError": 0.48451193464570397
+  },
+  "upgradeBase": {
+    "key": "upgradeBase",
+    "source": "Environment/UpgradeBase.png",
+    "columns": 1,
+    "rows": 1,
+    "frameWidth": 384,
+    "frameHeight": 375,
+    "padding": 0,
+    "display": [
+      220,
+      224
+    ],
+    "sourcePath": "public/assets/Arts/Environment/UpgradeBase.png",
+    "outputPath": "public/assets/Optimized/UpgradeBase.png",
+    "webpPath": "reports/stage2/comparisons/UpgradeBase.webp",
+    "comparisonPath": "reports/stage2/comparisons/upgradeBase.png",
+    "originalWidth": 1269,
+    "originalHeight": 1240,
+    "originalBytes": 1477797,
+    "originalHash": "B8CB328687EEEC04B1928402435BF5F4C89A35FC824AC1093B69C274559093EB",
+    "width": 384,
+    "height": 375,
+    "frames": [
+      {
+        "x": 0,
+        "y": 0,
+        "width": 384,
+        "height": 375,
+        "sourceBounds": {
+          "left": 0,
+          "top": 0,
+          "right": 1269,
+          "bottom": 1240
+        }
+      }
+    ],
+    "pngBytes": 180743,
+    "webpBytes": 140360,
+    "visibleDifferences": 0,
+    "alphaDifferences": 0,
+    "maxDisplayMeanAbsoluteError": 0.7491815476190476
+  },
+  "enemyNest": {
+    "key": "enemyNest",
+    "source": "Environment/enemyNest.png",
+    "columns": 2,
+    "rows": 1,
+    "frameWidth": 384,
+    "frameHeight": 384,
+    "padding": 2,
+    "display": [
+      296,
+      296
+    ],
+    "sourcePath": "public/assets/Arts/Environment/enemyNest.png",
+    "outputPath": "public/assets/Optimized/enemyNest.png",
+    "webpPath": "reports/stage2/comparisons/enemyNest.webp",
+    "comparisonPath": "reports/stage2/comparisons/enemyNest.png",
+    "originalWidth": 1774,
+    "originalHeight": 887,
+    "originalBytes": 2317150,
+    "originalHash": "F5E1E20311B0DC07D352227FE40A3649CB281E4B6B31772F0FAFA47E0C45FA4B",
+    "width": 776,
+    "height": 388,
+    "frames": [
+      {
+        "x": 2,
+        "y": 2,
+        "width": 384,
+        "height": 384,
+        "sourceBounds": {
+          "left": 0,
+          "top": 0,
+          "right": 887,
+          "bottom": 887
+        }
+      },
+      {
+        "x": 390,
+        "y": 2,
+        "width": 384,
+        "height": 384,
+        "sourceBounds": {
+          "left": 887,
+          "top": 0,
+          "right": 1774,
+          "bottom": 887
+        }
+      }
+    ],
+    "pngBytes": 518602,
+    "webpBytes": 409622,
+    "visibleDifferences": 0,
+    "alphaDifferences": 0,
+    "maxDisplayMeanAbsoluteError": 0.7894866995373752
+  },
+  "eggs": {
+    "key": "eggs",
+    "source": "Eggs/spr_Eggs.png",
+    "columns": 5,
+    "rows": 3,
+    "frameWidth": 180,
+    "frameHeight": 150,
+    "padding": 2,
+    "display": [
+      140,
+      117
+    ],
+    "sourcePath": "public/assets/Arts/Eggs/spr_Eggs.png",
+    "outputPath": "public/assets/Optimized/spr_Eggs.png",
+    "webpPath": "reports/stage2/comparisons/spr_Eggs.webp",
+    "comparisonPath": "reports/stage2/comparisons/eggs.png",
+    "originalWidth": 1774,
+    "originalHeight": 887,
+    "originalBytes": 1359504,
+    "originalHash": "3A046E45E5498CF463DEF9AA784CD7345AF90E39A9DCE77EDE746B68BA02C906",
+    "width": 920,
+    "height": 462,
+    "frames": [
+      {
+        "x": 2,
+        "y": 2,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 0,
+          "top": 0,
+          "right": 355,
+          "bottom": 296
+        }
+      },
+      {
+        "x": 186,
+        "y": 2,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 355,
+          "top": 0,
+          "right": 710,
+          "bottom": 296
+        }
+      },
+      {
+        "x": 370,
+        "y": 2,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 710,
+          "top": 0,
+          "right": 1064,
+          "bottom": 296
+        }
+      },
+      {
+        "x": 554,
+        "y": 2,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 1064,
+          "top": 0,
+          "right": 1419,
+          "bottom": 296
+        }
+      },
+      {
+        "x": 738,
+        "y": 2,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 1419,
+          "top": 0,
+          "right": 1774,
+          "bottom": 296
+        }
+      },
+      {
+        "x": 2,
+        "y": 156,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 0,
+          "top": 296,
+          "right": 355,
+          "bottom": 591
+        }
+      },
+      {
+        "x": 186,
+        "y": 156,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 355,
+          "top": 296,
+          "right": 710,
+          "bottom": 591
+        }
+      },
+      {
+        "x": 370,
+        "y": 156,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 710,
+          "top": 296,
+          "right": 1064,
+          "bottom": 591
+        }
+      },
+      {
+        "x": 554,
+        "y": 156,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 1064,
+          "top": 296,
+          "right": 1419,
+          "bottom": 591
+        }
+      },
+      {
+        "x": 738,
+        "y": 156,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 1419,
+          "top": 296,
+          "right": 1774,
+          "bottom": 591
+        }
+      },
+      {
+        "x": 2,
+        "y": 310,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 0,
+          "top": 591,
+          "right": 355,
+          "bottom": 887
+        }
+      },
+      {
+        "x": 186,
+        "y": 310,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 355,
+          "top": 591,
+          "right": 710,
+          "bottom": 887
+        }
+      },
+      {
+        "x": 370,
+        "y": 310,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 710,
+          "top": 591,
+          "right": 1064,
+          "bottom": 887
+        }
+      },
+      {
+        "x": 554,
+        "y": 310,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 1064,
+          "top": 591,
+          "right": 1419,
+          "bottom": 887
+        }
+      },
+      {
+        "x": 738,
+        "y": 310,
+        "width": 180,
+        "height": 150,
+        "sourceBounds": {
+          "left": 1419,
+          "top": 591,
+          "right": 1774,
+          "bottom": 887
+        }
+      }
+    ],
+    "pngBytes": 418381,
+    "webpBytes": 314466,
+    "visibleDifferences": 0,
+    "alphaDifferences": 0,
+    "maxDisplayMeanAbsoluteError": 0.5848595848595849
+  },
+  "ground": {
+    "key": "ground",
+    "source": "Environment/Tile_Ground_V2.png",
+    "columns": 3,
+    "rows": 1,
+    "frameWidth": 512,
+    "frameHeight": 512,
+    "padding": 2,
+    "repeat": true,
+    "display": [
+      390,
+      390
+    ],
+    "sourcePath": "public/assets/Arts/Environment/Tile_Ground_V2.png",
+    "outputPath": "public/assets/Optimized/Tile_Ground_V2.png",
+    "webpPath": "reports/stage2/comparisons/Tile_Ground_V2.webp",
+    "comparisonPath": "reports/stage2/comparisons/ground.png",
+    "originalWidth": 2172,
+    "originalHeight": 724,
+    "originalBytes": 1647895,
+    "originalHash": "722B23ECC75EE04358C08795510BEBDE9387D78A3518F2E3768EC7671209C301",
+    "width": 1548,
+    "height": 516,
+    "frames": [
+      {
+        "x": 2,
+        "y": 2,
+        "width": 512,
+        "height": 512,
+        "sourceBounds": {
+          "left": 0,
+          "top": 0,
+          "right": 724,
+          "bottom": 724
+        }
+      },
+      {
+        "x": 518,
+        "y": 2,
+        "width": 512,
+        "height": 512,
+        "sourceBounds": {
+          "left": 724,
+          "top": 0,
+          "right": 1448,
+          "bottom": 724
+        }
+      },
+      {
+        "x": 1034,
+        "y": 2,
+        "width": 512,
+        "height": 512,
+        "sourceBounds": {
+          "left": 1448,
+          "top": 0,
+          "right": 2172,
+          "bottom": 724
+        }
+      }
+    ],
+    "pngBytes": 1050537,
+    "webpBytes": 739820,
+    "visibleDifferences": 0,
+    "alphaDifferences": 0,
+    "maxDisplayMeanAbsoluteError": 0.3287069910146833
+  }
+}

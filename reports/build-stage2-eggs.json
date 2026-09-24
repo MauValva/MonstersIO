@@ -1,0 +1,139 @@
+{
+  "totals": {
+    "total": 7472081,
+    "javascript": 628609,
+    "images": 6842591,
+    "audio": 0,
+    "fonts": 0,
+    "other": 881,
+    "jsGzip": 191278,
+    "files": 23
+  },
+  "files": [
+    {
+      "path": "dist/assets/Arts/Player/Player_EvoMonster.png",
+      "bytes": 2333710,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Arts/Environment/Tile_Ground_V2.png",
+      "bytes": 1647895,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Arts/UI/UI_Upgrades.png",
+      "bytes": 1023664,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Optimized/enemyNest.png",
+      "bytes": 518602,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Optimized/spr_Eggs.png",
+      "bytes": 418381,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/index-Dos1qdRf.js",
+      "bytes": 356184,
+      "category": "javascript",
+      "gzipBytes": 113382
+    },
+    {
+      "path": "dist/assets/Optimized/UpgradeBase.png",
+      "bytes": 180743,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Optimized/Enemies.png",
+      "bytes": 177870,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Optimized/Plant.png",
+      "bytes": 168387,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Arts/Environment/Nest_Player.png",
+      "bytes": 130486,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Arts/UI/UI_HUD.png",
+      "bytes": 124839,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/Arts/Player/PlayerCloud.png",
+      "bytes": 118014,
+      "category": "images"
+    },
+    {
+      "path": "dist/assets/WebGLRenderer-CC-YS5fy.js",
+      "bytes": 72276,
+      "category": "javascript",
+      "gzipBytes": 19711
+    },
+    {
+      "path": "dist/assets/RenderTargetSystem-DZvhu13j.js",
+      "bytes": 52580,
+      "category": "javascript",
+      "gzipBytes": 14561
+    },
+    {
+      "path": "dist/assets/WebGPURenderer-_fT3N-QI.js",
+      "bytes": 46304,
+      "category": "javascript",
+      "gzipBytes": 13325
+    },
+    {
+      "path": "dist/assets/browserAll-COIXD-r8.js",
+      "bytes": 43300,
+      "category": "javascript",
+      "gzipBytes": 11368
+    },
+    {
+      "path": "dist/assets/CanvasRenderer-Br_d8plJ.js",
+      "bytes": 18382,
+      "category": "javascript",
+      "gzipBytes": 6161
+    },
+    {
+      "path": "dist/assets/webworkerAll-CTSK4aad.js",
+      "bytes": 15580,
+      "category": "javascript",
+      "gzipBytes": 4924
+    },
+    {
+      "path": "dist/assets/BitmapFont-2-IcyAHe.js",
+      "bytes": 13062,
+      "category": "javascript",
+      "gzipBytes": 4769
+    },
+    {
+      "path": "dist/assets/BufferResource-YUkFfFpX.js",
+      "bytes": 10037,
+      "category": "javascript",
+      "gzipBytes": 2604
+    },
+    {
+      "path": "dist/assets/Filter-fNdMBlkA.js",
+      "bytes": 904,
+      "category": "javascript",
+      "gzipBytes": 473
+    },
+    {
+      "path": "dist/index.html",
+      "bytes": 608,
+      "category": "other"
+    },
+    {
+      "path": "dist/assets/index-bIzaopPh.css",
+      "bytes": 273,
+      "category": "other"
+    }
+  ]
+}
