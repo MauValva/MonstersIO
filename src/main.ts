@@ -4,19 +4,25 @@ import { GAME_ASSETS } from "./assets";
 import { gridTextures } from "./art-textures";
 import { createUpgradeAssetLoader } from "./upgrade-assets";
 import { createWorldScene } from "./world/world-scene";
+import { createEggSystem } from "./systems/eggs/egg-system";
+import { createEnemySystem } from "./systems/enemies/enemy-system";
+import {
+  createPlayerSystem,
+  type PlayerUpgrades,
+} from "./systems/player/player-system";
+import { createProgressionSystem } from "./systems/progression/progression-system";
 import type { Point } from "./game/types";
 import {
   CAMERA_ZOOM,
   DEBUG_OPEN_UPGRADE_MENU,
-  EGG_SPAWN_CONFIG,
-  FOLLOW_DISTANCE,
+  GOLD_MINE_CONFIG,
   INITIAL_EGG_POSITIONS,
   NEST_INTERACTION_RADIUS,
+  POST_FIRST_EVOLUTION_EGG_POSITIONS,
   PLAYABLE_BOUNDS,
   RIVALS_START_ACTIVE,
   STAGES,
   WORLD,
-  getStageVisualScale,
 } from "./config/game-config";
 import {
   Application,
@@ -70,13 +76,29 @@ async function bootstrap() {
     });
   }
 
-  const [groundAtlas, nestTexture, enemyNestTexture, playerEvolutionTexture,
-    playerCloudTexture, enemyTexture,
-    eggTexture, plantTexture, hudTexture] = await Promise.all([
-      GAME_ASSETS.ground, GAME_ASSETS.nest, GAME_ASSETS.enemyNest, GAME_ASSETS.player,
-      GAME_ASSETS.cloud, GAME_ASSETS.enemy,
-      GAME_ASSETS.eggs, GAME_ASSETS.plant, GAME_ASSETS.hud,
-    ].map((path) => Assets.load<Texture>(path)));
+  const [
+    groundAtlas,
+    nestTexture,
+    enemyNestTexture,
+    playerEvolutionTexture,
+    playerCloudTexture,
+    enemyTexture,
+    eggTexture,
+    plantTexture,
+    hudTexture,
+  ] = await Promise.all(
+    [
+      GAME_ASSETS.ground,
+      GAME_ASSETS.nest,
+      GAME_ASSETS.enemyNest,
+      GAME_ASSETS.player,
+      GAME_ASSETS.cloud,
+      GAME_ASSETS.enemy,
+      GAME_ASSETS.eggs,
+      GAME_ASSETS.plant,
+      GAME_ASSETS.hud,
+    ].map((path) => Assets.load<Texture>(path)),
+  );
   const { obstacles, bushes } = createWorldScene(
     world,
     groundAtlas,
@@ -107,7 +129,12 @@ async function bootstrap() {
     });
   });
   const enemyFrames = gridTextures(enemyTexture, GAME_ASSETS.enemy, 2, 1);
-  const enemyNestFrames = gridTextures(enemyNestTexture, GAME_ASSETS.enemyNest, 2, 1);
+  const enemyNestFrames = gridTextures(
+    enemyNestTexture,
+    GAME_ASSETS.enemyNest,
+    2,
+    1,
+  );
   // Geometry-only source: no bitmap download/upload. The whole panel stays
   // hidden until every frame and the station art have been bound atomically.
   const upgradeUiPlaceholder = new TextureSource({ width: 1983, height: 793 });
@@ -157,9 +184,14 @@ async function bootstrap() {
   };
   const eggColumns = 5;
   const eggRows = 3;
-  const eggFrames = gridTextures(eggTexture, GAME_ASSETS.eggs, eggColumns, eggRows);
+  const eggFrames = gridTextures(
+    eggTexture,
+    GAME_ASSETS.eggs,
+    eggColumns,
+    eggRows,
+  );
   // Keep the original 354.8 x 295.666... logical cell at every progression scale.
-  const eggResolutionScale = (1774 / eggColumns) / eggFrames[0].width;
+  const eggResolutionScale = 1774 / eggColumns / eggFrames[0].width;
   const base = new Container();
   // The nest is the safe home at the southern edge of the world. Exploration
   // naturally opens upward from here through the upgrade station.
@@ -241,85 +273,23 @@ async function bootstrap() {
     { shell: 0xffd7ed, outline: 0xed77b4, spot: 0xb85cff },
     { shell: 0xe4d7ff, outline: 0xb28cff, spot: 0x7c5cff },
   ];
-  const eggs: Container[] = [];
-  // Keep only live eggs in gameplay scans, and retain a small reusable reserve.
-  const eggPool: Container[] = [];
-  const eggMotion = new Map<
-    Container,
-    { phase: number; spawnElapsed: number; spawnDuration: number }
-  >();
-  let eggSerial = 0;
-  function spawnEgg(position: Point, stageIndex: number) {
-    const eggFrame = eggFrames[Math.min(stageIndex, eggFrames.length - 1)];
-    const safePosition = {
-      x: Math.max(
-        PLAYABLE_BOUNDS.left + 30,
-        Math.min(PLAYABLE_BOUNDS.right - 30, position.x),
-      ),
-      y: Math.max(
-        PLAYABLE_BOUNDS.top + 30,
-        Math.min(PLAYABLE_BOUNDS.bottom - 30, position.y),
-      ),
-    };
-    const egg = eggPool.pop() ?? new Container();
-    egg.visible = true;
-    egg.position.set(safePosition.x, safePosition.y);
-    egg.label = `egg-${eggSerial++}`;
-    const eggSprite = (egg.children[0] as Sprite | undefined) ?? new Sprite(eggFrame);
-    eggSprite.texture = eggFrame;
-    eggSprite.position.set(0);
-    eggSprite.rotation = 0;
-    eggSprite.anchor.set(0.5);
-    eggSprite.scale.set(
-      0.19 * eggResolutionScale * (1 + (getStageVisualScale(stageIndex) - 1) * 0.42),
-    );
-    if (eggSprite.parent !== egg) egg.addChild(eggSprite);
-    egg.scale.set(0.12);
-    eggLayer.addChild(egg);
-    eggs.push(egg);
-    eggMotion.set(egg, {
-      phase: Math.random() * Math.PI * 2,
-      spawnElapsed: 0,
-      spawnDuration: 0.42,
-    });
-    return egg;
-  }
-  INITIAL_EGG_POSITIONS.forEach((position) => spawnEgg(position, 0));
-
-  const player = new Container();
-  player.position.set(3000, 3300);
-  const playerBody = new Graphics();
-  const playerEyes = new Graphics();
-  const playerCloud = new Sprite(playerCloudTexture);
-  playerCloud.anchor.set(0.5);
-  playerCloud.position.set(0, 52);
-  playerCloud.width = 118;
-  playerCloud.height = 59;
-  const playerEvolution = new Sprite(playerEvolutionFrames[0]);
-  playerEvolution.anchor.set(0.5);
-  playerEvolution.position.set(0, -10);
-  playerEvolution.width = 105;
-  playerEvolution.height = 135;
-  playerBody.visible = false;
-  playerEyes.visible = false;
-  const pickupIndicator = new Graphics();
-  player.addChild(
-    pickupIndicator,
-    playerCloud,
-    playerEvolution,
-    playerBody,
-    playerEyes,
-  );
-  world.addChild(player);
+  const progression = createProgressionSystem();
+  const playerSystem = createPlayerSystem({
+    world,
+    evolutionFrames: playerEvolutionFrames,
+    cloudTexture: playerCloudTexture,
+    getStageIndex: () => progression.stageIndex,
+  });
+  const { player, playerEvolution, pickupIndicator } = playerSystem;
 
   const getCameraTarget = (shakeX = 0, shakeY = 0) => ({
-      x: Math.min(
-        0,
+    x: Math.min(
+      0,
       Math.max(
         window.innerWidth - WORLD.width * CAMERA_ZOOM,
         window.innerWidth / 2 - player.x * CAMERA_ZOOM + shakeX,
       ),
-      ),
+    ),
     y: Math.min(
       -WORLD.top * CAMERA_ZOOM,
       Math.max(
@@ -335,19 +305,10 @@ async function bootstrap() {
   const initialCameraTarget = getCameraTarget();
   camera.position.set(initialCameraTarget.x, initialCameraTarget.y);
 
-  type PlayerUpgrades = {
-    speed: number;
-    pickupRadius: number;
-  };
-  const upgrades: PlayerUpgrades = {
-    speed: 280,
-    pickupRadius: 92,
-  };
+  const upgrades = playerSystem.upgrades;
   const upgradeLevels = { speed: 0, pickupRadius: 0 };
   let upgradePoints = 0;
   let carried = 0;
-  let delivered = 0;
-  let skinIndex = 0;
   let time = 0;
   let currency = 0;
   let playerCollected = 0;
@@ -376,41 +337,33 @@ async function bootstrap() {
   let firstEnemySeen = false;
   let redIntroChaseCompleted = false;
   let redIntroChaseHadEggs = false;
+  let enemyTutorialPending = false;
+  let enemyTutorialShown = false;
+  let firstDepositCompleted = false;
+  let hideTutorialArmed = false;
   let hideTutorialCompleted = false;
-  let nestTutorialShown = false;
   let nestOffscreenElapsed = 0;
+  let tutorialEgg: Container | null = null;
+  let tutorialEggsCollected = 0;
   let hideTutorialBush: (typeof bushes)[number] | null = null;
-  const carriedEggs: Container[] = [];
-  const getCurrentVisualScale = () => getStageVisualScale(skinIndex);
-  const getEggWorldSpriteScale = () =>
-    0.19 * eggResolutionScale * Math.min(1.22, 1 + (getCurrentVisualScale() - 1) * 0.42);
+  const getCurrentVisualScale = () => progression.visualScale;
   const getCarriedEggScale = () =>
     0.67 * Math.min(1.18, 1 + (getCurrentVisualScale() - 1) * 0.38);
   const getCarriedEggGap = () => Math.max(72, 60 * getCurrentVisualScale());
-  const getCarriedEggDistance = (index: number) =>
-    getCarriedEggGap() + 28 + getCarriedEggGap() * index;
-  type EggHideAnimation = {
-    egg: Container;
-    from: Point;
-    to: Point;
-    elapsed: number;
-    hiding: boolean;
-  };
-  const eggHideAnimations: EggHideAnimation[] = [];
-  const eggsInHideAnimation = new Set<Container>();
-  function releaseEgg(egg: Container) {
-    egg.removeFromParent();
-    egg.visible = false;
-    const index = eggs.indexOf(egg);
-    if (index !== -1) eggs.splice(index, 1);
-    eggMotion.delete(egg);
-    eggsInHideAnimation.delete(egg);
-    for (let i = eggHideAnimations.length - 1; i >= 0; i -= 1) {
-      if (eggHideAnimations[i].egg === egg) eggHideAnimations.splice(i, 1);
-    }
-    if (eggPool.length < EGG_SPAWN_CONFIG.activeTarget) eggPool.push(egg);
-    else egg.destroy({ children: true });
-  }
+  const eggSystem = createEggSystem({
+    eggLayer,
+    eggFrames,
+    eggResolutionScale,
+    getStageIndex: () => progression.stageIndex,
+    getPlayerPosition: () => player.position,
+    getNestPosition: () => base.position,
+    getCarriedEggScale,
+    getCarriedEggGap,
+  });
+  INITIAL_EGG_POSITIONS.forEach((position) => eggSystem.spawnEgg(position, 0));
+  GOLD_MINE_CONFIG.positions.forEach((position) =>
+    eggSystem.spawnEgg(position, 0),
+  );
   const input = { x: 0, y: 0 };
   let gameplayStarted = false;
   let sdkAdPlaying = false;
@@ -423,109 +376,40 @@ async function bootstrap() {
   let joystickCenter: Point = { x: 0, y: 0 };
   let joystickActive = false;
 
-  type Enemy = {
-    container: Container;
-    body: Graphics;
-    eyes: Graphics;
-    art: Sprite;
-    cloud: Sprite;
-    eggs: Container[];
-    target: Container | null;
-    speed: number;
-    homeBase: Container;
-    dazedUntil: number;
-    collected: number;
-    depositing: boolean;
-  };
-  function createEnemyBase(
-    position: Point,
-    color: number,
-    artTexture: Texture,
-  ) {
-    const enemyBase = new Container();
-    enemyBase.position.set(position.x, position.y);
-    enemyBase.visible = false;
-    const nestArt = new Sprite(artTexture);
-    nestArt.anchor.set(0.5);
-    // Original frame was 887x887. Preserve its world size after downsampling.
-    nestArt.scale.set((887 * 0.26) / artTexture.width, (887 * 0.26) / artTexture.height);
-    enemyBase.addChild(nestArt);
-    const baseLabel = label("RIVAL NEST", 13, color);
-    baseLabel.anchor.set(0.5);
-    baseLabel.position.set(0, 62);
-    enemyBase.addChild(baseLabel);
-    world.addChild(enemyBase);
-    return enemyBase;
-  }
-  function createEnemy(
-    position: Point,
-    color: number,
-    homeBase: Container,
-    artTexture: Texture,
-  ): Enemy {
-    const container = new Container();
-    container.position.set(position.x, position.y);
-    const body = new Graphics()
-      .circle(0, 0, 42)
-      .fill(color)
-      .circle(0, 0, 29)
-      .fill({ color: 0xffffff, alpha: 0.14 });
-    const eyes = new Graphics()
-      .ellipse(-13, -7, 6, 10)
-      .fill(0x18263b)
-      .ellipse(13, -7, 6, 10)
-      .fill(0x18263b);
-    const cloud = new Sprite(playerCloudTexture);
-    cloud.anchor.set(0.5);
-    cloud.position.set(0, 48);
-    cloud.width = 124;
-    cloud.height = 62;
-    cloud.tint = color === 0xff6f78 ? 0xff9c9c : 0xd7b8ff;
-    const art = new Sprite(artTexture);
-    art.anchor.set(0.5);
-    art.position.set(0, -12);
-    art.width = 112;
-    art.height = 112;
-    body.visible = false;
-    eyes.visible = false;
-    container.addChild(cloud, art, body, eyes);
-    world.addChild(container);
-    container.visible = false;
-    return {
-      container,
-      body,
-      eyes,
-      art,
-      cloud,
-      eggs: [],
-      target: null,
-      speed: 155,
-      homeBase,
-      dazedUntil: 0,
-      collected: 0,
-      depositing: false,
-    };
-  }
-  const enemyBases = [
-    createEnemyBase({ x: 2200, y: 850 }, 0xff6f78, enemyNestFrames[0]),
-    createEnemyBase({ x: 4700, y: -1500 }, 0x9c7dff, enemyNestFrames[1]),
-  ];
-  const enemies: Enemy[] = [
-    createEnemy({ x: 2200, y: 850 }, 0xff6f78, enemyBases[0], enemyFrames[0]),
-    createEnemy({ x: 4400, y: -1200 }, 0x9c7dff, enemyBases[1], enemyFrames[1]),
-  ];
-  type EnemyDepositAnimation = {
-    enemy: Enemy;
-    eggs: Container[];
-    elapsed: number;
-  };
-  const enemyDepositAnimations: EnemyDepositAnimation[] = [];
+  const enemySystem = createEnemySystem({
+    world,
+    eggLayer,
+    eggSystem,
+    enemyFrames,
+    enemyNestFrames,
+    playerCloudTexture,
+    label,
+    getPlayerPosition: () => player.position,
+    getTime: () => time,
+    getCarriedEggScale,
+    onEnemyCollectedEgg: () => {
+      eggRespawnPending = true;
+    },
+    onPlayerCarriedCountChanged: (count) => {
+      carried = count;
+    },
+    onRedIntroSteal: () => {
+      if (!enemyTutorialShown) enemyTutorialPending = true;
+      if (!redIntroChaseCompleted) {
+        redIntroChaseCompleted = true;
+        redIntroChaseHadEggs = false;
+      }
+    },
+  });
+  const { enemies } = enemySystem;
   // A vegetação fica na frente dos personagens e dos ovos no mapa.
-  world.setChildIndex(obstacles, world.children.length - 1);
-  function setEggWorldSpriteScale(egg: Container) {
-    const sprite = egg.children[0];
-    if (sprite instanceof Sprite) sprite.scale.set(getEggWorldSpriteScale());
+  // Rival nests belong above the ground, but behind eggs, characters and
+  // vegetation. They must not visually cover the gameplay actors.
+  const obstacleLayerIndex = world.getChildIndex(obstacles);
+  for (const enemyBase of enemySystem.enemyBases) {
+    world.setChildIndex(enemyBase, obstacleLayerIndex);
   }
+  world.setChildIndex(obstacles, world.children.length - 1);
   function refreshProgressionVisuals() {
     const progressionScale = getCurrentVisualScale();
     const bushScale = Math.min(1.18, 1 + (progressionScale - 1) * 0.2);
@@ -534,20 +418,8 @@ async function bootstrap() {
       bush.sprite.height = bush.height * bushScale;
       bush.sprite.scale.x = bush.flipX * Math.abs(bush.sprite.scale.x);
     }
-    for (const egg of eggs) setEggWorldSpriteScale(egg);
-    for (const egg of carriedEggs) {
-      setEggWorldSpriteScale(egg);
-      egg.scale.set(getCarriedEggScale());
-    }
-    for (const enemy of enemies) {
-      enemy.container.scale.set(
-        Math.min(1.16, 1 + (progressionScale - 1) * 0.3),
-      );
-      for (const egg of enemy.eggs) {
-        setEggWorldSpriteScale(egg);
-        egg.scale.set(getCarriedEggScale() * 0.84);
-      }
-    }
+    eggSystem.refreshScales();
+    enemySystem.refreshVisualScales(progressionScale);
   }
 
   function refreshRanking() {
@@ -562,46 +434,8 @@ async function bootstrap() {
   }
 
   function redrawPlayer() {
-    const stage = STAGES[Math.min(skinIndex, STAGES.length - 1)];
-    playerEvolution.texture =
-      playerEvolutionFrames[
-        Math.min(skinIndex, playerEvolutionFrames.length - 1)
-      ];
-    playerEvolution.width = 105 * stage.scale;
-    playerEvolution.height = 135 * stage.scale;
-    playerCloud.width = 118 * stage.scale;
-    playerCloud.height = 59 * stage.scale;
-    playerCloud.position.set(0, 52 * stage.scale);
-    playerCloud.visible = skinIndex < STAGES.length - 2;
-    playerEvolution.position.set(0, -10 * stage.scale);
-    playerBody
-      .clear()
-      .circle(0, 0, 45 * stage.scale)
-      .fill(stage.color)
-      .circle(0, 0, 31 * stage.scale)
-      .fill({ color: 0xffffff, alpha: 0.14 });
-    playerEyes
-      .clear()
-      .ellipse(-14 * stage.scale, -7 * stage.scale, 6, 10)
-      .fill(0x18263b)
-      .ellipse(14 * stage.scale, -7 * stage.scale, 6, 10)
-      .fill(0x18263b);
-    player.scale.set(1);
+    playerSystem.redraw();
     refreshProgressionVisuals();
-    pickupIndicator.clear();
-    const segments = 36;
-    for (let i = 0; i < segments; i += 2) {
-      const start = (i / segments) * Math.PI * 2;
-      const end = ((i + 1) / segments) * Math.PI * 2;
-      pickupIndicator.moveTo(
-        Math.cos(start) * upgrades.pickupRadius,
-        Math.sin(start) * upgrades.pickupRadius,
-      );
-      pickupIndicator
-        .arc(0, 0, upgrades.pickupRadius, start, end)
-        .stroke({ color: 0xfff2a6, alpha: 0.9, width: 3 });
-    }
-    pickupIndicator.alpha = 0.48;
   }
   redrawPlayer();
 
@@ -618,23 +452,26 @@ async function bootstrap() {
   function updateBushHideFeedback(hidden: boolean) {
     let hidingBush: (typeof bushes)[number] | null = null;
     if (hidden) {
-      hidingBush = bushes.reduce((best, bush) => {
-        const bushCenterY = bush.y - bush.height * 0.44;
-        const normalizedX = (player.x - bush.x) / (bush.width * 0.5);
-        const normalizedY = (player.y - bushCenterY) / (bush.height * 0.5);
-        const cover = Math.max(0, 1 - Math.hypot(normalizedX, normalizedY));
-        if (!best) return cover >= 0.55 ? bush : null;
-        const bestCenterY = best.y - best.height * 0.44;
-        const bestCover = Math.max(
-          0,
-          1 -
-            Math.hypot(
-              (player.x - best.x) / (best.width * 0.5),
-              (player.y - bestCenterY) / (best.height * 0.5),
-            ),
-        );
-        return cover > bestCover ? bush : best;
-      }, null as (typeof bushes)[number] | null);
+      hidingBush = bushes.reduce(
+        (best, bush) => {
+          const bushCenterY = bush.y - bush.height * 0.44;
+          const normalizedX = (player.x - bush.x) / (bush.width * 0.5);
+          const normalizedY = (player.y - bushCenterY) / (bush.height * 0.5);
+          const cover = Math.max(0, 1 - Math.hypot(normalizedX, normalizedY));
+          if (!best) return cover >= 0.5 ? bush : null;
+          const bestCenterY = best.y - best.height * 0.44;
+          const bestCover = Math.max(
+            0,
+            1 -
+              Math.hypot(
+                (player.x - best.x) / (best.width * 0.5),
+                (player.y - bestCenterY) / (best.height * 0.5),
+              ),
+          );
+          return cover > bestCover ? bush : best;
+        },
+        null as (typeof bushes)[number] | null,
+      );
     }
     for (const bush of bushes) {
       bush.sprite.alpha = hidingBush === bush ? 0.42 : 1;
@@ -642,78 +479,34 @@ async function bootstrap() {
   }
 
   function animateCarriedEggsForBush(hiding: boolean) {
-    eggHideAnimations.length = 0;
-    eggsInHideAnimation.clear();
-    if (carriedEggs.length === 0) return;
-    const bush = bushes.reduce((closest, candidate) => {
-      const currentDistance = distance(player.position, {
-        x: candidate.x,
-        y: candidate.y - candidate.height * 0.44,
-      });
-      const closestDistance = distance(player.position, {
-        x: closest.x,
-        y: closest.y - closest.height * 0.44,
-      });
-      return currentDistance < closestDistance ? candidate : closest;
-    }, bushes[0]);
-    carriedEggs.forEach((egg, index) => {
-      // Keep the previous hide animation: move the queue into the selected
-      // bush, but leave the eggs visible through the semitransparent bush.
-      const target = hiding
-        ? {
-            x: bush.x + (index - (carriedEggs.length - 1) / 2) * 16,
-            y: bush.y - bush.height * 0.44 + 8,
-          }
-        : {
-            x: player.x - getCarriedEggDistance(index),
-            y: player.y,
-          };
-      egg.visible = true;
-      eggsInHideAnimation.add(egg);
-      eggHideAnimations.push({
-        egg,
-        from: { x: egg.x, y: egg.y },
-        to: target,
-        elapsed: 0,
-        hiding: false,
-      });
-    });
+    eggSystem.startBushHideAnimation(player.position, hiding, bushes);
   }
 
   function updateCarriedEggBushAnimations(dt: number) {
-    for (let i = eggHideAnimations.length - 1; i >= 0; i -= 1) {
-      const animation = eggHideAnimations[i];
-      animation.elapsed += dt;
-      const progress = Math.min(1, animation.elapsed / 0.42);
-      const eased = 1 - (1 - progress) ** 3;
-      animation.egg.position.set(
-        animation.from.x + (animation.to.x - animation.from.x) * eased,
-        animation.from.y + (animation.to.y - animation.from.y) * eased,
-      );
-      animation.egg.scale.set(
-        getCarriedEggScale() * (1 + Math.sin(progress * Math.PI) * 0.28),
-      );
-      if (progress >= 1) {
-        animation.egg.scale.set(getCarriedEggScale());
-        animation.egg.visible = animation.hiding ? false : true;
-        eggsInHideAnimation.delete(animation.egg);
-        eggHideAnimations.splice(i, 1);
-      }
-    }
+    eggSystem.updateCarriedEggBushAnimations(dt);
   }
 
-  let previewState: { skin: number; delivered: number; evolving: boolean } | undefined;
+  let previewState:
+    | { skin: number; delivered: number; evolving: boolean }
+    | undefined;
   function redrawBasePreview() {
-    if (previewState?.skin === skinIndex &&
-        previewState.delivered === baseVisualDelivered &&
-        previewState.evolving === evolving) return;
-    previewState = { skin: skinIndex, delivered: baseVisualDelivered, evolving };
-    const nextIndex = Math.min(skinIndex + 1, STAGES.length - 1);
+    if (
+      previewState?.skin === progression.stageIndex &&
+      previewState.delivered === baseVisualDelivered &&
+      previewState.evolving === evolving
+    )
+      return;
+    previewState = {
+      skin: progression.stageIndex,
+      delivered: baseVisualDelivered,
+      evolving,
+    };
+    const nextIndex = Math.min(progression.stageIndex + 1, STAGES.length - 1);
     const nextStage = STAGES[nextIndex];
     const threshold = nextStage.threshold;
     const previousThreshold = STAGES[Math.max(0, nextIndex - 1)].threshold;
     const progress =
-      nextIndex === skinIndex
+      nextIndex === progression.stageIndex
         ? 0
         : Math.min(
             1,
@@ -723,7 +516,7 @@ async function bootstrap() {
                 Math.max(1, threshold - previousThreshold),
             ),
           );
-    basePreview.visible = nextIndex > skinIndex && !evolving;
+    basePreview.visible = nextIndex > progression.stageIndex && !evolving;
     const radius = 37 * nextStage.scale;
     basePreviewEvolution.texture = playerEvolutionFrames[nextIndex];
     basePreviewEvolutionColor.texture = playerEvolutionFrames[nextIndex];
@@ -854,13 +647,19 @@ async function bootstrap() {
   const upgradePanel = new Graphics();
   const upgradePanelArt = new Sprite(upgradePanelFrame);
   upgradePanelArt.anchor.set(0.5);
-  upgradePanelArt.width = 820;
-  upgradePanelArt.height = 720;
+  upgradePanelArt.width = 1000;
+  upgradePanelArt.height = 1000;
   upgradePanel.addChildAt(upgradePanelArt, 0);
   upgradePanel.position.set(window.innerWidth / 2, window.innerHeight / 2);
   ui.addChild(upgradePanel);
   upgradePanel.visible = false;
   upgradeOverlay.visible = false;
+  const upgradeCurrencyHud = new Container();
+  const upgradeCurrencyPill = new Graphics()
+    .roundRect(-150, -42, 300, 84, 28)
+    .fill(0x0b2035)
+    .stroke({ color: 0x315b79, width: 5 });
+  upgradeCurrencyHud.addChild(upgradeCurrencyPill);
   const upgradeLoadStatus = label("", 16, 0xfff2a6);
   upgradeLoadStatus.anchor.set(0.5);
   upgradeLoadStatus.visible = false;
@@ -884,33 +683,28 @@ async function bootstrap() {
   upgradeText.position.set(-134, -48);
   upgradePanel.addChild(upgradeText);
   upgradeTitle.text = "UPGRADES";
-  upgradeTitle.style.fontSize = 48;
+  upgradeTitle.style.fontSize = 72;
   upgradeTitle.anchor.set(0.5);
-  upgradeTitle.position.set(0, -280);
+  upgradeTitle.position.set(0, -380);
   upgradeTitle.style.fontWeight = "900";
   const upgradeCurrencyText = label("0", 36, 0xfff2a6);
   upgradeCurrencyText.anchor.set(0.5);
-  upgradeCurrencyText.position.set(0, -200);
-  const upgradeCurrencyPill = new Graphics()
-    .roundRect(-92, -174, 184, 64, 24)
-    .fill(0x0b2035)
-    .stroke({ color: 0x315b79, width: 4 });
-  upgradeCurrencyPill.position.set(0, -60);
+  upgradeCurrencyText.style.fontSize = 52;
+  upgradeCurrencyText.position.set(24, 0);
   const currencyGem = new Sprite(upgradeUiFrame(1622, 493, 164, 164));
   currencyGem.anchor.set(0.5);
-  currencyGem.position.set(-42, -200);
-  currencyGem.width = 28;
-  currencyGem.height = 28;
-  upgradePanel.addChild(upgradeCurrencyPill);
-  upgradePanel.addChild(currencyGem);
-  upgradePanel.addChild(upgradeCurrencyText);
-  upgradeTitle.position.set(0, -280);
+  currencyGem.position.set(-74, 0);
+  currencyGem.width = 42;
+  currencyGem.height = 42;
+  upgradeCurrencyHud.addChild(currencyGem, upgradeCurrencyText);
+  ui.addChild(upgradeCurrencyHud);
+  upgradeTitle.position.set(0, -380);
   const upgradeHint = label("", 11, 0x9cb8c2);
   upgradeHint.position.set(0, 0);
   upgradePanel.addChild(upgradeHint);
   upgradeHint.visible = false;
   const closeUpgradeButton = drawRounded(0xc85162, 62, 62, 16);
-  closeUpgradeButton.position.set(350, -260);
+  closeUpgradeButton.position.set(430, -380);
   const closeButtonArt = new Sprite(upgradeUiFrame(1790, 490, 190, 190));
   closeButtonArt.anchor.set(0.5);
   closeButtonArt.width = 100;
@@ -927,8 +721,8 @@ async function bootstrap() {
   const upgradeButtons = (
     [
       {
-        x: -115,
-        y: 110,
+        x: -190,
+        y: 150,
         key: "speed",
         name: "SPEED",
         detail: () => `${upgrades.speed}  →  ${upgrades.speed + 45}`,
@@ -937,10 +731,10 @@ async function bootstrap() {
         },
       },
       {
-        x: 115,
-        y: 110,
+        x: 190,
+        y: 150,
         key: "pickupRadius",
-        name: "PICKUP\nRANGE",
+        name: "RANGE",
         detail: () =>
           `${upgrades.pickupRadius}  →  ${upgrades.pickupRadius + 18}`,
         apply: () => {
@@ -960,8 +754,8 @@ async function bootstrap() {
     button.position.set(x, y);
     const cardArt = new Sprite(upgradeCardFrame);
     cardArt.anchor.set(0.5);
-    cardArt.width = 230;
-    cardArt.height = 520;
+    cardArt.width = 350;
+    cardArt.height = 800;
     button.addChildAt(cardArt, 0);
     button.eventMode = "static";
     button.cursor = "pointer";
@@ -973,37 +767,43 @@ async function bootstrap() {
     button.addChild(buttonText);
     const icon = new Sprite(upgradeIconFrames[key]);
     icon.anchor.set(0.5);
-    icon.position.set(0, -180);
-    icon.width = 116;
-    icon.height = 98;
+    icon.position.set(0, -280);
+    icon.width = 240;
+    icon.height = 200;
     button.addChild(icon);
-    const cardTitle = label(name, 28, 0xffffff);
+    const cardTitle = label(name, 48, 0xffffff);
     cardTitle.anchor.set(0.5);
-    cardTitle.position.set(0, -110);
+    cardTitle.position.set(0, -150);
     cardTitle.style.align = "center";
     button.addChild(cardTitle);
-    const cardDetail = label("", 28, 0xf5ffff);
+    const cardDetail = label("", 42, 0xf5ffff);
     cardDetail.anchor.set(0.5);
-    cardDetail.position.set(0, -45);
+    cardDetail.position.set(0, -50);
     cardDetail.style.align = "center";
     button.addChild(cardDetail);
-    const cardDelta = label("+ upgrade", 28, 0xa8ff91);
+    const cardDelta = label("+ upgrade", 64, 0xa8ff91);
     cardDelta.anchor.set(0.5);
-    cardDelta.position.set(0, 3);
+    cardDelta.position.set(0, 55);
     button.addChild(cardDelta);
     const cardCost = label("", 28, 0xffe39a);
+    cardCost.visible = false;
     cardCost.anchor.set(0.5);
     cardCost.position.set(0, 50);
     button.addChild(cardCost);
     const actionButton = new Sprite(upgradeButtonFrames.enabled);
     actionButton.anchor.set(0.5);
-    actionButton.position.set(7, 115);
-    actionButton.width = 200;
-    actionButton.height = 70;
-    const actionText = label("UPGRADE", 32, 0xf5ffff);
+    actionButton.position.set(10, 175);
+    actionButton.width = 300;
+    actionButton.height = 100;
+    const actionCurrencyGem = new Sprite(upgradeUiFrame(1622, 493, 164, 164));
+    actionCurrencyGem.anchor.set(0.5);
+    actionCurrencyGem.position.set(-58, 0);
+    actionCurrencyGem.width = 64;
+    actionCurrencyGem.height = 64;
+    const actionText = label("", 72, 0xf5ffff);
     actionText.anchor.set(0.5);
-    actionText.position.set(-10, 0);
-    actionButton.addChild(actionText);
+    actionText.position.set(22, 0);
+    actionButton.addChild(actionCurrencyGem, actionText);
     button.addChild(actionButton);
     button.on("pointertap", () => {
       const cost = 20 + upgradeLevels[key] * 15;
@@ -1014,8 +814,6 @@ async function bootstrap() {
         firstUpgradeCompleted = true;
         upgradeFtueVisible = false;
         clearTutorialTarget("UPGRADE");
-        if (firstEnemySeen && carried >= 5 && !hideTutorialCompleted)
-          setTutorialTarget("BUSH");
       }
       apply();
       redrawPlayer();
@@ -1056,13 +854,14 @@ async function bootstrap() {
       upgrade.actionButton.texture = available
         ? upgradeButtonFrames.enabled
         : upgradeButtonFrames.disabled;
-      upgrade.actionText.text = available ? "UPGRADE" : "NEED CURRENCY";
+      upgrade.actionText.text = String(cost);
       upgrade.buttonText.text = `${upgrade.name}\n\n${upgrade.detail()}\n\n◆ ${cost}`;
     }
   }
   closeUpgradeButton.on("pointertap", () => {
     upgradeMenuOpen = false;
     upgradePanel.visible = false;
+    upgradeCurrencyHud.visible = false;
     upgradeOverlay.visible = false;
     upgradeContactProgress = 0;
     upgradeStationArmed = false;
@@ -1090,32 +889,41 @@ async function bootstrap() {
       upgradeLoadStatus.visible = true;
     }
     if (upgradeArtPromise) return upgradeArtPromise;
-    upgradeArtPromise = loadUpgradeAssets().then(({ ui, base }) => {
-      for (const frame of upgradeUiFrames) {
-        frame.source = ui.source;
-        frame.update();
-      }
-      // Sprite retains its explicit 172 x 175 world size on texture replacement.
-      upgradeBaseSprite.texture = base;
-      upgradeUiPlaceholder.destroy();
-      upgradeAssetsReady = true;
-      upgradeLoadStatus.visible = false;
-      if (upgradeUnlockRequested) unlockUpgradeStationTutorial();
-      if (DEBUG_OPEN_UPGRADE_MENU) {
-        upgradeMenuOpen = true;
-        upgradePanel.visible = true;
-        upgradeOverlay.visible = true;
-      }
-      return true;
-    }).catch((error: unknown) => {
-      upgradeArtPromise = null;
-      console.warn("Upgrade artwork could not be loaded; retry is available", error);
-      if (upgradeUnlockRequested) {
-        upgradeLoadStatus.text = "Upgrades unavailable. Tap to retry.";
-        upgradeLoadStatus.visible = true;
-      }
-      return false;
-    });
+    upgradeArtPromise = loadUpgradeAssets()
+      .then(({ ui: loadedUpgradeUi, base }) => {
+        for (const frame of upgradeUiFrames) {
+          frame.source = loadedUpgradeUi.source;
+          frame.update();
+        }
+        // Sprite retains its explicit 172 x 175 world size on texture replacement.
+        upgradeBaseSprite.texture = base;
+        upgradeUiPlaceholder.destroy();
+        upgradeAssetsReady = true;
+        upgradeLoadStatus.visible = false;
+        if (upgradeUnlockRequested) unlockUpgradeStationTutorial();
+        if (DEBUG_OPEN_UPGRADE_MENU) {
+          upgradeMenuOpen = true;
+          upgradePanel.visible = true;
+          upgradeCurrencyHud.visible = true;
+          upgradeOverlay.visible = true;
+          ui.setChildIndex(upgradeOverlay, ui.children.length - 1);
+          ui.setChildIndex(upgradePanel, ui.children.length - 1);
+          ui.setChildIndex(upgradeCurrencyHud, ui.children.length - 1);
+        }
+        return true;
+      })
+      .catch((error: unknown) => {
+        upgradeArtPromise = null;
+        console.warn(
+          "Upgrade artwork could not be loaded; retry is available",
+          error,
+        );
+        if (upgradeUnlockRequested) {
+          upgradeLoadStatus.text = "Upgrades unavailable. Tap to retry.";
+          upgradeLoadStatus.visible = true;
+        }
+        return false;
+      });
     return upgradeArtPromise;
   }
 
@@ -1168,34 +976,63 @@ async function bootstrap() {
   resizeBootCover();
   window.addEventListener("resize", resizeBootCover);
 
-  type TutorialTarget = "NEST" | "UPGRADE" | "BUSH" | null;
+  type TutorialTarget = "EGG" | "NEST" | "UPGRADE" | "BUSH" | "ENEMY" | null;
   let activeTutorialTarget: TutorialTarget = null;
+  let tutorialEnemy: (typeof enemies)[number] | null = null;
   const setTutorialTarget = (target: TutorialTarget) => {
     activeTutorialTarget = target;
     tutorialIndicatorLabel.text =
-      target === "BUSH" ? "HIDE" : target === "NEST" ? "" : target ?? "";
+      target === "BUSH"
+        ? "HIDE"
+        : target === "ENEMY"
+          ? "STEAL"
+          : target === "EGG"
+            ? "PICK UP"
+            : target === "NEST"
+              ? ""
+              : (target ?? "");
     tutorialIndicatorLabel.visible = target !== null;
   };
   const clearTutorialTarget = (target: TutorialTarget) => {
     if (activeTutorialTarget === target) setTutorialTarget(null);
   };
+  tutorialEgg = eggSystem.eggs[0] ?? null;
+  setTutorialTarget("EGG");
 
-  let uiState: {
-    delivered: number; currency: number; speed: number; pickup: number;
-    playerScore: number; rival1: number; rival2: number;
-  } | undefined;
+  let uiState:
+    | {
+        delivered: number;
+        currency: number;
+        speed: number;
+        pickup: number;
+        playerScore: number;
+        rival1: number;
+        rival2: number;
+      }
+    | undefined;
   function updateUI() {
     redrawBasePreview();
-    if (uiState?.delivered === delivered && uiState.currency === currency &&
-        uiState.speed === upgrades.speed && uiState.pickup === upgrades.pickupRadius &&
-        uiState.playerScore === playerCollected && uiState.rival1 === enemies[0].collected &&
-        uiState.rival2 === enemies[1].collected) return;
-    uiState = { delivered, currency, speed: upgrades.speed, pickup: upgrades.pickupRadius,
-      playerScore: playerCollected, rival1: enemies[0].collected, rival2: enemies[1].collected };
-    const nextThreshold =
-      STAGES.find((stage) => stage.threshold > delivered)?.threshold ??
-      STAGES[STAGES.length - 1].threshold;
-    progressText.text = `${delivered} / ${nextThreshold}`;
+    if (
+      uiState?.delivered === progression.delivered &&
+      uiState.currency === currency &&
+      uiState.speed === upgrades.speed &&
+      uiState.pickup === upgrades.pickupRadius &&
+      uiState.playerScore === playerCollected &&
+      uiState.rival1 === enemies[0].collected &&
+      uiState.rival2 === enemies[1].collected
+    )
+      return;
+    uiState = {
+      delivered: progression.delivered,
+      currency,
+      speed: upgrades.speed,
+      pickup: upgrades.pickupRadius,
+      playerScore: playerCollected,
+      rival1: enemies[0].collected,
+      rival2: enemies[1].collected,
+    };
+    const nextThreshold = progression.getNextThreshold();
+    progressText.text = `${progression.delivered} / ${nextThreshold}`;
     currencyText.text = String(currency);
     upgradeText.text = `Speed  ${upgrades.speed}\nPickup range  ${upgrades.pickupRadius}`;
     upgradeCurrencyText.text = `${currency}`;
@@ -1215,7 +1052,10 @@ async function bootstrap() {
   }
 
   function resizeUI() {
-    upgradeLoadStatus.position.set(window.innerWidth / 2, window.innerHeight - 40);
+    upgradeLoadStatus.position.set(
+      window.innerWidth / 2,
+      window.innerHeight - 40,
+    );
     header.position.set(window.innerWidth / 2, 58);
     hint.position.set(window.innerWidth / 2, 154);
     const hudScale = Math.min(1, Math.max(0.78, window.innerWidth / 440));
@@ -1235,11 +1075,17 @@ async function bootstrap() {
         (window.innerHeight - 80) / 720,
       ),
     );
+    upgradeCurrencyHud.position.set(
+      window.innerWidth / 2,
+      window.innerHeight / 2 - 250 * desktopScale,
+    );
+    upgradeCurrencyHud.scale.set(desktopScale / 2.2);
     upgradeOverlay
       .clear()
       .rect(0, 0, window.innerWidth, window.innerHeight)
       .fill({ color: 0x000000, alpha: 0.74 });
     upgradePanel.visible = upgradeMenuOpen;
+    upgradeCurrencyHud.visible = upgradeMenuOpen;
     upgradeOverlay.visible = upgradeMenuOpen;
   }
   resizeUI();
@@ -1278,14 +1124,53 @@ async function bootstrap() {
       }
     }
   });
+  const pressedKeys = new Set<string>();
+  const updateKeyboardInput = () => {
+    if (joystickActive) return;
+    const left = pressedKeys.has("ArrowLeft") || pressedKeys.has("KeyA");
+    const right = pressedKeys.has("ArrowRight") || pressedKeys.has("KeyD");
+    const up = pressedKeys.has("ArrowUp") || pressedKeys.has("KeyW");
+    const down = pressedKeys.has("ArrowDown") || pressedKeys.has("KeyS");
+    const x = (right ? 1 : 0) - (left ? 1 : 0);
+    const y = (down ? 1 : 0) - (up ? 1 : 0);
+    const magnitude = Math.hypot(x, y);
+    input.x = magnitude > 0 ? x / magnitude : 0;
+    input.y = magnitude > 0 ? y / magnitude : 0;
+  };
   const releaseJoystick = () => {
     joystickActive = false;
     joystick.visible = false;
-    input.x = input.y = 0;
+    updateKeyboardInput();
     joyKnob.position.set(0);
   };
   app.stage.on("pointerup", releaseJoystick);
   app.stage.on("pointerupoutside", releaseJoystick);
+
+  const keyboardCodes = new Set([
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "ArrowDown",
+    "KeyW",
+    "KeyA",
+    "KeyS",
+    "KeyD",
+  ]);
+  window.addEventListener("keydown", (event) => {
+    if (!keyboardCodes.has(event.code)) return;
+    event.preventDefault();
+    startGameplay();
+    pressedKeys.add(event.code);
+    updateKeyboardInput();
+  });
+  window.addEventListener("keyup", (event) => {
+    pressedKeys.delete(event.code);
+    updateKeyboardInput();
+  });
+  window.addEventListener("blur", () => {
+    pressedKeys.clear();
+    updateKeyboardInput();
+  });
 
   await pokiReady;
   poki.loadingFinished();
@@ -1295,75 +1180,6 @@ async function bootstrap() {
   }
   let eggRespawnTimer = 0;
   let eggRespawnPending = false;
-  const randomEggRespawnDelay = () =>
-    EGG_SPAWN_CONFIG.respawnMin +
-    Math.random() *
-      (EGG_SPAWN_CONFIG.respawnMax - EGG_SPAWN_CONFIG.respawnMin);
-  const getActiveWorldEggs = () =>
-    eggs.filter((egg) => egg.visible && egg.parent === eggLayer);
-  const countActiveWorldEggs = () => {
-    let count = 0;
-    for (const egg of eggs) if (egg.visible && egg.parent === eggLayer) count += 1;
-    return count;
-  };
-  const isValidEggSpawn = (position: Point) => {
-    if (distance(position, player.position) < EGG_SPAWN_CONFIG.minFromPlayer)
-      return false;
-    if (distance(position, base.position) < EGG_SPAWN_CONFIG.minFromNest)
-      return false;
-    if (
-      getActiveWorldEggs().some(
-        (egg) => distance(position, egg.position) < EGG_SPAWN_CONFIG.minBetweenEggs,
-      )
-    )
-      return false;
-    return !bushes.some((bush) => {
-      const normalizedX = (position.x - bush.x) / (bush.width * 0.5);
-      const normalizedY =
-        (position.y - (bush.y - bush.height * 0.44)) / (bush.height * 0.5);
-      return Math.hypot(normalizedX, normalizedY) < 0.8;
-    });
-  };
-  const spawnDirectorEgg = () => {
-    const activeEggs = getActiveWorldEggs();
-    const zone = [...EGG_SPAWN_CONFIG.zones]
-      .sort(
-        (a, b) =>
-          activeEggs.filter((egg) =>
-            b.bounds.left <= egg.x &&
-            egg.x <= b.bounds.right &&
-            b.bounds.top <= egg.y &&
-            egg.y <= b.bounds.bottom,
-          ).length -
-          activeEggs.filter((egg) =>
-            a.bounds.left <= egg.x &&
-            egg.x <= a.bounds.right &&
-            a.bounds.top <= egg.y &&
-            egg.y <= a.bounds.bottom,
-          ).length,
-      )
-      .find((candidate) =>
-        activeEggs.filter(
-          (egg) =>
-            candidate.bounds.left <= egg.x &&
-            egg.x <= candidate.bounds.right &&
-            candidate.bounds.top <= egg.y &&
-            egg.y <= candidate.bounds.bottom,
-        ).length < candidate.target,
-      );
-    if (!zone) return false;
-    for (let attempt = 0; attempt < 24; attempt += 1) {
-      const position = {
-        x: zone.bounds.left + Math.random() * (zone.bounds.right - zone.bounds.left),
-        y: zone.bounds.top + Math.random() * (zone.bounds.bottom - zone.bounds.top),
-      };
-      if (isValidEggSpawn(position)) {
-        spawnEgg(position, skinIndex);
-        return true;
-      }
-    }
-    return false;
-  };
   function shakeCamera(duration: number, strength: number) {
     if (duration >= cameraShakeTime) {
       cameraShakeStrength = strength;
@@ -1392,7 +1208,11 @@ async function bootstrap() {
   evolutionSprite.anchor.set(0.5);
   const evolutionTitle = label("EVOLUTION!", 42, 0xfff2a6);
   evolutionTitle.anchor.set(0.5);
-  evolutionFx.addChild(evolutionParticlesLayer, evolutionSprite, evolutionTitle);
+  evolutionFx.addChild(
+    evolutionParticlesLayer,
+    evolutionSprite,
+    evolutionTitle,
+  );
   const evolutionParticles: Particle[] = [];
   let evolutionElapsed = 0;
   let evolutionTarget = 0;
@@ -1490,9 +1310,15 @@ async function bootstrap() {
       evolutionFx.visible = false;
       evolutionOverlay.visible = false;
       evolving = false;
-      skinIndex = evolutionTarget;
+      progression.completeEvolution(evolutionTarget);
       redrawPlayer();
       redrawBasePreview();
+      if (evolutionTarget === 1 && !hideTutorialCompleted) {
+        for (const position of POST_FIRST_EVOLUTION_EGG_POSITIONS) {
+          eggSystem.spawnEgg(position, progression.stageIndex);
+        }
+        hideTutorialArmed = true;
+      }
       if (basePreview.visible) {
         basePreview.scale.set(0.08);
         nestPreviewJuiceElapsed = 0;
@@ -1519,117 +1345,6 @@ async function bootstrap() {
         elapsed: -i * 0.08,
         start: { x: start.x, y: start.y },
       });
-    }
-  }
-
-  function updateEnemy(enemy: Enemy, dt: number, chasingPlayer: boolean) {
-    if (enemy.depositing) return;
-    if (enemy.eggs.length >= 5) enemy.target = null;
-    if (
-      enemy.eggs.length < 5 &&
-      (!enemy.target ||
-        !enemy.target.visible ||
-        enemy.target.parent !== eggLayer)
-    ) {
-      enemy.target = null;
-      let nearestDistance = Infinity;
-      for (const egg of eggs) {
-        if (!egg.visible || egg.parent !== eggLayer) continue;
-        const candidateDistance = distance(enemy.container.position, egg.position);
-        if (candidateDistance < nearestDistance) {
-          nearestDistance = candidateDistance;
-          enemy.target = egg;
-        }
-      }
-    }
-    const destination =
-      chasingPlayer
-        ? player.position
-        : enemy.eggs.length >= 5
-        ? enemy.homeBase.position
-        : enemy.target?.position;
-    if (destination) {
-      const dx = destination.x - enemy.container.x;
-      const dy = destination.y - enemy.container.y;
-      const d = Math.max(1, Math.hypot(dx, dy));
-      enemy.container.x += (dx / d) * enemy.speed * dt;
-      enemy.container.y += (dy / d) * enemy.speed * dt;
-    }
-    enemy.container.x = Math.max(
-      PLAYABLE_BOUNDS.left,
-      Math.min(PLAYABLE_BOUNDS.right, enemy.container.x),
-    );
-    enemy.container.y = Math.max(
-      PLAYABLE_BOUNDS.top,
-      Math.min(PLAYABLE_BOUNDS.bottom, enemy.container.y),
-    );
-    if (
-      enemy.target &&
-      enemy.target.parent === eggLayer &&
-      distance(enemy.container.position, enemy.target.position) < 72
-    ) {
-      const egg = enemy.target;
-      eggLayer.removeChild(egg);
-      egg.scale.set(getCarriedEggScale() * 0.84);
-        enemy.eggs.push(egg);
-        eggRespawnPending = true;
-        world.addChildAt(egg, world.getChildIndex(enemy.container));
-      enemy.target = null;
-    }
-    if (
-      enemy.eggs.length > 0 &&
-      distance(enemy.container.position, enemy.homeBase.position) < 125
-    ) {
-      enemy.collected += enemy.eggs.length;
-      enemy.depositing = true;
-      enemyDepositAnimations.push({
-        enemy,
-        eggs: [...enemy.eggs],
-        elapsed: 0,
-      });
-      enemy.eggs.length = 0;
-    }
-    for (let i = 0; i < enemy.eggs.length; i += 1) {
-      const egg = enemy.eggs[i];
-      const leader = i === 0 ? enemy.container : enemy.eggs[i - 1];
-      const dx = leader.x - egg.x;
-      const dy = leader.y - egg.y;
-      const d = Math.max(1, Math.hypot(dx, dy));
-      if (d > FOLLOW_DISTANCE) {
-        const ratio = (d - FOLLOW_DISTANCE) / d;
-        egg.x += dx * ratio * Math.min(1, dt * 10);
-        egg.y += dy * ratio * Math.min(1, dt * 10);
-      }
-    }
-  }
-
-  function resolveStealing() {
-    for (const enemy of enemies) {
-      if (time >= enemy.dazedUntil) {
-        const playerQueueEgg = carriedEggs.find(
-          (egg) => distance(enemy.container.position, egg.position) < 54,
-        );
-        if (playerQueueEgg) {
-          // Contact steals the full queue, preserving the game's clear
-          // risk/reward consequence instead of removing a single egg.
-          enemy.eggs.push(...carriedEggs.splice(0, carriedEggs.length));
-          carried = 0;
-          if (enemy === enemies[0] && !redIntroChaseCompleted) {
-            redIntroChaseCompleted = true;
-            redIntroChaseHadEggs = false;
-          }
-        }
-      }
-      for (let i = enemy.eggs.length - 1; i >= 0; i -= 1) {
-        if (
-          distance(player.position, enemy.eggs[i].position) < 54
-        ) {
-          carriedEggs.push(enemy.eggs.splice(i, 1)[0]);
-          carried = carriedEggs.length;
-          enemy.dazedUntil = time + 4;
-          break;
-        }
-      }
     }
   }
 
@@ -1660,46 +1375,15 @@ async function bootstrap() {
       upgradeAlert.rotation = Math.sin(time * 11) * 0.08;
     }
     pickupFlash = Math.max(0, pickupFlash - dt);
-    for (const egg of eggs) {
-      if (!egg.visible || egg.parent !== eggLayer) continue;
-      const motion = eggMotion.get(egg);
-      const sprite = egg.children[0];
-      if (!motion || !(sprite instanceof Sprite)) continue;
-      const motionTime = time * 1.45 + motion.phase;
-      motion.spawnElapsed = Math.min(
-        motion.spawnDuration,
-        motion.spawnElapsed + dt,
-      );
-      const spawnProgress = Math.min(
-        1,
-        motion.spawnElapsed / motion.spawnDuration,
-      );
-      const spawnEased = 1 - (1 - spawnProgress) ** 3;
-      const spawnOvershoot = Math.sin(spawnProgress * Math.PI) * 0.12;
-      egg.scale.set(0.12 + spawnEased * 0.88 + spawnOvershoot);
-      sprite.y = Math.sin(motionTime) * 2.5;
-      sprite.rotation = Math.sin(motionTime * 0.8) * 0.045;
-    }
+    eggSystem.updateWorldEggMotion(dt, time);
     if (pickupFlash > 0) {
       const progress = 1 - pickupFlash / 0.42;
       pickupIndicator.alpha = 0.48 + Math.sin(progress * Math.PI) * 0.52;
     } else {
       pickupIndicator.alpha = 0.48;
     }
-    const speed = upgrades.speed;
-    if (!evolving) {
-      player.x += input.x * speed * dt;
-      player.y += input.y * speed * dt;
-    }
-    player.x = Math.max(
-      PLAYABLE_BOUNDS.left,
-      Math.min(PLAYABLE_BOUNDS.right, player.x),
-    );
-    player.y = Math.max(
-      PLAYABLE_BOUNDS.top,
-      Math.min(PLAYABLE_BOUNDS.bottom, player.y),
-    );
-    const hiddenNow = getBushCover(player.position) >= 0.55;
+    playerSystem.move(input.x, input.y, dt, evolving);
+    const hiddenNow = getBushCover(player.position) >= 0.5;
     if (hiddenNow !== playerHidden) {
       playerHidden = hiddenNow;
       updateBushHideFeedback(playerHidden);
@@ -1718,15 +1402,13 @@ async function bootstrap() {
       }
     }
     updateCarriedEggBushAnimations(dt);
-    const playerStageScale =
-      STAGES[Math.min(skinIndex, STAGES.length - 1)].scale;
     const isPlayerMoving = Math.hypot(input.x, input.y) > 0.05;
-    const idleFloat =
-      !isPlayerMoving && !evolving ? Math.sin(time * 3.2) * 5 : 0;
-    playerEvolution.y = -10 * playerStageScale + idleFloat;
-    playerCloud.y = 52 * playerStageScale + idleFloat * 0.35;
-    player.rotation =
-      Math.sin(time * 8) * 0.035 * Math.min(1, Math.hypot(input.x, input.y));
+    playerSystem.updateIdleVisual(
+      time,
+      isPlayerMoving,
+      evolving,
+      Math.hypot(input.x, input.y),
+    );
     const upgradeDistance = distance(player.position, upgradeStation.position);
     if (!upgradeStationArmed && upgradeDistance > 160) {
       upgradeStationArmed = true;
@@ -1755,19 +1437,21 @@ async function bootstrap() {
         upgradeMenuOpen = true;
         upgradeStationArmed = false;
         upgradePanel.visible = true;
+        upgradeCurrencyHud.visible = true;
         upgradeOverlay.visible = true;
         upgradeFtueVisible = false;
         upgradeStation.rotation = 0;
         upgradeStation.scale.set(1);
-        ui.setChildIndex(upgradeOverlay, ui.children.length - 2);
+        ui.setChildIndex(upgradeOverlay, ui.children.length - 1);
         ui.setChildIndex(upgradePanel, ui.children.length - 1);
+        ui.setChildIndex(upgradeCurrencyHud, ui.children.length - 1);
         refreshUpgradeButtons();
       }
     } else if (!upgradeMenuOpen) {
       upgradeContactProgress = Math.max(0, upgradeContactProgress - dt * 2.5);
       upgradeStationCore.clear();
     }
-    for (const egg of eggs) {
+    for (const egg of eggSystem.eggs) {
       if (
         !depositing &&
         egg.visible &&
@@ -1777,11 +1461,27 @@ async function bootstrap() {
         egg.visible = true;
         egg.scale.set(getCarriedEggScale());
         eggLayer.removeChild(egg);
-        carriedEggs.push(egg);
+        eggSystem.addCarriedEgg(egg);
         carried += 1;
+        if (activeTutorialTarget === "EGG") {
+          tutorialEggsCollected += 1;
+          if (tutorialEggsCollected < 2) {
+            tutorialEgg =
+              eggSystem.eggs.find(
+                (candidate) =>
+                  candidate !== egg &&
+                  candidate.visible &&
+                  candidate.parent === eggLayer,
+              ) ?? null;
+            setTutorialTarget(tutorialEgg ? "EGG" : "NEST");
+          } else {
+            tutorialEgg = null;
+            setTutorialTarget("NEST");
+          }
+        }
         if (!eggRespawnPending) {
           eggRespawnPending = true;
-          eggRespawnTimer = randomEggRespawnDelay();
+          eggRespawnTimer = eggSystem.randomRespawnDelay(egg.position);
         }
         pickupFlash = 0.42;
         shakeCamera(0.14, 5);
@@ -1789,26 +1489,31 @@ async function bootstrap() {
         updateUI();
       }
     }
-    // The bush tutorial is contextual: the first enemy must have been seen,
-    // and the player must actually be carrying a full five-egg stack.
     if (
-      firstEnemySeen &&
-      carried >= 5 &&
+      hideTutorialArmed &&
       !hideTutorialCompleted &&
+      carried >= 2 &&
       activeTutorialTarget === null &&
       !upgradeMenuOpen
     ) {
+      hideTutorialArmed = false;
+      hideTutorialBush = bushes.reduce(
+        (closest, candidate) =>
+          distance(player.position, {
+            x: candidate.x,
+            y: candidate.y - candidate.height * 0.44,
+          }) <
+          distance(player.position, {
+            x: closest.x,
+            y: closest.y - closest.height * 0.44,
+          })
+            ? candidate
+            : closest,
+        bushes[0],
+      );
       setTutorialTarget("BUSH");
     }
-    if (
-      !nestTutorialShown &&
-      carried >= 6 &&
-      activeTutorialTarget === null
-    ) {
-      nestTutorialShown = true;
-      setTutorialTarget("NEST");
-    }
-    const rivalsActive = RIVALS_START_ACTIVE || skinIndex >= 1;
+    const rivalsActive = RIVALS_START_ACTIVE || progression.stageIndex >= 1;
     if (
       rivalsActive &&
       !firstEnemySeen &&
@@ -1833,13 +1538,8 @@ async function bootstrap() {
             : closest,
         bushes[0],
       );
-      if (!hideTutorialCompleted && activeTutorialTarget === null)
-        setTutorialTarget("BUSH");
     }
-    for (let i = 0; i < enemies.length; i += 1) {
-      enemies[i].container.visible = rivalsActive;
-      enemyBases[i].visible = rivalsActive;
-    }
+    enemySystem.updateVisibility(rivalsActive);
     // The opening chase ends only after the red rival steals an egg, or after
     // the player successfully deposits the queue while being chased.
     if (!redIntroChaseCompleted && carried > 0) redIntroChaseHadEggs = true;
@@ -1861,67 +1561,52 @@ async function bootstrap() {
                 distance(b.container.position, player.position),
             )[0] ?? null)
         : null;
-    const activeChaser =
-      !redIntroChaseCompleted &&
-      rivalsActive &&
-      !playerHidden &&
-      time >= enemies[0].dazedUntil
-        ? enemies[0]
-        : normalChaser &&
-            distance(normalChaser.container.position, player.position) < 1200
-          ? normalChaser
-          : null;
-    if (rivalsActive)
-      for (const enemy of enemies)
-        updateEnemy(
-          enemy,
-          dt,
-          enemy === activeChaser,
-        );
-    for (let i = enemyDepositAnimations.length - 1; i >= 0; i -= 1) {
-      const animation = enemyDepositAnimations[i];
-      animation.elapsed += dt;
-      const depositDuration = 0.52;
-      for (let eggIndex = 0; eggIndex < animation.eggs.length; eggIndex += 1) {
-        const egg = animation.eggs[eggIndex];
-        const progress = Math.max(
-          0,
-          Math.min(1, (animation.elapsed - eggIndex * 0.055) / depositDuration),
-        );
-        const eased = 1 - (1 - progress) ** 3;
-        egg.x +=
-          (animation.enemy.homeBase.x - egg.x) * Math.min(1, dt * 18) * eased;
-        egg.y +=
-          (animation.enemy.homeBase.y - egg.y) * Math.min(1, dt * 18) * eased;
-        egg.scale.set(0.67 * (1 - eased * 0.35));
-      }
-      if (
-        animation.elapsed >=
-        depositDuration + Math.max(0, animation.eggs.length - 1) * 0.055
-      ) {
-        for (const egg of animation.eggs) releaseEgg(egg);
-        animation.enemy.depositing = false;
-        enemyDepositAnimations.splice(i, 1);
-      }
+    // Opening state: the red rival always chases the player from the start.
+    // After the intro is completed, control returns to the regular rival AI.
+    const introChaseActive =
+      rivalsActive && !redIntroChaseCompleted && time >= enemies[0].dazedUntil;
+    const activeChaser = introChaseActive
+      ? enemies[0]
+      : normalChaser &&
+          distance(normalChaser.container.position, player.position) < 1200
+        ? normalChaser
+        : null;
+    if (rivalsActive) {
+      enemySystem.updateAI(
+        dt,
+        activeChaser,
+        introChaseActive ? enemies[0] : null,
+      );
     }
+    enemySystem.updateDeposits(dt);
     if (
       !eggRespawnPending &&
-      countActiveWorldEggs() < EGG_SPAWN_CONFIG.activeTarget
+      eggSystem.countActiveWorldEggs() < eggSystem.activeTarget
     ) {
       eggRespawnPending = true;
-      eggRespawnTimer = randomEggRespawnDelay();
+      eggRespawnTimer = eggSystem.randomRespawnDelay();
     }
     if (eggRespawnPending) {
       eggRespawnTimer = Math.max(0, eggRespawnTimer - dt);
-      if (eggRespawnTimer <= 0 && spawnDirectorEgg()) {
+      if (eggRespawnTimer <= 0 && eggSystem.spawnDirectorEgg(bushes)) {
         eggRespawnPending = false;
-        if (countActiveWorldEggs() < EGG_SPAWN_CONFIG.activeTarget)
+        if (eggSystem.countActiveWorldEggs() < eggSystem.activeTarget)
           eggRespawnPending = true;
-        if (eggRespawnPending) eggRespawnTimer = randomEggRespawnDelay();
+        if (eggRespawnPending) eggRespawnTimer = eggSystem.randomRespawnDelay();
       }
     }
     if (!depositing && rivalsActive && !playerHidden) {
-      resolveStealing();
+      const recoveredEnemyEgg = enemySystem.resolveStealing();
+      if (recoveredEnemyEgg && activeTutorialTarget === "ENEMY") {
+        tutorialEnemy = null;
+        setTutorialTarget("NEST");
+      }
+      if (enemyTutorialPending) {
+        enemyTutorialPending = false;
+        enemyTutorialShown = true;
+        tutorialEnemy = enemies[0];
+        setTutorialTarget("ENEMY");
+      }
       updateUI();
     }
     if (
@@ -1931,9 +1616,9 @@ async function bootstrap() {
     ) {
       depositing = true;
       depositElapsed = 0;
-      depositingEggs = [...carriedEggs];
+      depositingEggs = [...eggSystem.carriedEggs];
       depositArrivals = depositingEggs.map(() => false);
-      baseVisualDelivered = delivered;
+      baseVisualDelivered = progression.delivered;
       shakeCamera(0.7, 11);
       redrawBasePreview();
     }
@@ -1961,25 +1646,26 @@ async function bootstrap() {
         depositDuration + Math.max(0, depositingEggs.length - 1) * 0.055
       ) {
         const depositedCount = depositingEggs.length;
-        delivered += depositedCount;
-        if (delivered > 0) clearTutorialTarget("NEST");
+        const delivery = progression.recordDelivery(depositedCount);
+        if (progression.delivered > 0) {
+          firstDepositCompleted = true;
+          clearTutorialTarget("NEST");
+        }
         playerCollected += depositedCount;
         currency += depositedCount * 10;
         spawnCurrencyJuice(depositedCount);
         upgradePoints += depositedCount;
         carried = 0;
-        baseVisualDelivered = delivered;
-        for (const egg of depositingEggs) releaseEgg(egg);
-        carriedEggs.length = 0;
+        baseVisualDelivered = progression.delivered;
+        for (const egg of depositingEggs) eggSystem.releaseEgg(egg);
+        eggSystem.takeAllCarriedEggs();
         depositingEggs = [];
         depositArrivals = [];
         depositing = false;
-        const next = STAGES.findIndex((stage) => delivered < stage.threshold);
-        const unlockedIndex =
-          next === -1 ? STAGES.length - 1 : Math.max(0, next - 1);
-        if (unlockedIndex > skinIndex) startEvolutionFeedback(unlockedIndex);
+        if (delivery.shouldEvolve)
+          startEvolutionFeedback(delivery.unlockedIndex);
         else {
-          skinIndex = unlockedIndex;
+          progression.completeEvolution(delivery.unlockedIndex);
           redrawPlayer();
           redrawBasePreview();
           updateUI();
@@ -1987,11 +1673,10 @@ async function bootstrap() {
       }
     }
     if (!depositing && !playerHidden) {
-      for (let i = 0; i < carriedEggs.length; i += 1) {
-        const egg = carriedEggs[i];
-        if (eggsInHideAnimation.has(egg))
-          continue;
-        const leader = i === 0 ? player : carriedEggs[i - 1];
+      for (let i = 0; i < eggSystem.carriedEggs.length; i += 1) {
+        const egg = eggSystem.carriedEggs[i];
+        if (eggSystem.eggsInHideAnimation.has(egg)) continue;
+        const leader = i === 0 ? player : eggSystem.carriedEggs[i - 1];
         const dx = leader.x - egg.x;
         const dy = leader.y - egg.y;
         const d = Math.hypot(dx, dy);
@@ -2063,6 +1748,14 @@ async function bootstrap() {
         currencyBursts.splice(i, 1);
       }
     }
+    if (
+      activeTutorialTarget === "EGG" &&
+      (!tutorialEgg || !tutorialEgg.visible || tutorialEgg.parent !== eggLayer)
+    ) {
+      tutorialEgg =
+        eggSystem.eggs.find((egg) => egg.visible && egg.parent === eggLayer) ??
+        null;
+    }
     const baseScreen = base.toGlobal({ x: 0, y: 0 });
     const playerScreen = player.toGlobal({ x: 0, y: -105 });
     const baseOnScreen =
@@ -2070,31 +1763,31 @@ async function bootstrap() {
       baseScreen.x <= window.innerWidth &&
       baseScreen.y >= 0 &&
       baseScreen.y <= window.innerHeight;
-    nestOffscreenElapsed = baseOnScreen
-      ? 0
-      : nestOffscreenElapsed + dt;
-    const showNestNavigation = nestOffscreenElapsed >= 60;
+    nestOffscreenElapsed = baseOnScreen ? 0 : nestOffscreenElapsed + dt;
+    const showNestNavigation = nestOffscreenElapsed >= 15;
     const nestIndicatorActive =
       activeTutorialTarget === "NEST" ||
       (activeTutorialTarget === null && showNestNavigation);
-    const tutorialWorldTarget =
-      nestIndicatorActive
-        ? base.position
+    const tutorialWorldTarget = nestIndicatorActive
+      ? base.position
+      : activeTutorialTarget === "EGG" && tutorialEgg
+        ? tutorialEgg.position
         : activeTutorialTarget === "UPGRADE"
-        ? upgradeStation.position
-        : activeTutorialTarget === "BUSH" && hideTutorialBush
-          ? {
-              x: hideTutorialBush.x,
-              y: hideTutorialBush.y - hideTutorialBush.height * 0.44,
-            }
-          : null;
+          ? upgradeStation.position
+          : activeTutorialTarget === "ENEMY" && tutorialEnemy
+            ? tutorialEnemy.container.position
+            : activeTutorialTarget === "BUSH" && hideTutorialBush
+              ? {
+                  x: hideTutorialBush.x,
+                  y: hideTutorialBush.y - hideTutorialBush.height * 0.44,
+                }
+              : null;
     const targetScreen = tutorialWorldTarget
       ? world.toGlobal(tutorialWorldTarget)
       : baseScreen;
     // The upgrade target indicator must never render over the upgrade screen.
     const hasIndicator =
-      !upgradeMenuOpen &&
-      (Boolean(activeTutorialTarget) || showNestNavigation);
+      !upgradeMenuOpen && (Boolean(activeTutorialTarget) || showNestNavigation);
     baseIndicator.visible = hasIndicator;
     baseIndicatorText.visible = nestIndicatorActive;
     tutorialIndicatorLabel.visible =

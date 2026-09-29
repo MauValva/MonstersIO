@@ -21,7 +21,7 @@ export const PLAYABLE_BOUNDS = {
 
 export const STAGES = [
   { name: "Hatchling", threshold: 0, color: 0x65d5ff, scale: 1 },
-  { name: "Young", threshold: 6, color: 0xffca62, scale: 1.14 },
+  { name: "Young", threshold: 4, color: 0xffca62, scale: 1.14 },
   { name: "Alpha", threshold: 16, color: 0xf77b9b, scale: 1.3 },
   { name: "Legendary", threshold: 30, color: 0xb28cff, scale: 1.5 },
   { name: "Ember", threshold: 48, color: 0xff875f, scale: 1.62 },
@@ -46,16 +46,40 @@ export const PLANT_POSITIONS: Point[] = [
 ];
 
 export const EGG_SPAWN_CONFIG = {
-  activeTarget: 20,
-  respawnMin: 2,
-  respawnMax: 5,
+  activeTarget: 44,
+  respawnMin: 1.5,
+  respawnMax: 4,
   minBetweenEggs: 220,
   minFromPlayer: 300,
   minFromNest: 170,
   zones: [
     { name: "SAFE", bounds: { left: 2500, right: 3500, top: 2850, bottom: 3850 }, target: 2 },
-    { name: "EXPLORATION", bounds: { left: 1750, right: 4450, top: 800, bottom: 2850 }, target: 6 },
-    { name: "RISK", bounds: { left: 500, right: 5700, top: -3900, bottom: 800 }, target: 12 },
+    { name: "EXPLORATION", bounds: { left: 1500, right: 4700, top: 650, bottom: 2850 }, target: 14 },
+    { name: "ENEMY_TERRITORY", bounds: { left: 700, right: 5500, top: -2200, bottom: 650 }, target: 10 },
+    { name: "GOLD_MINE", bounds: { left: 1500, right: 4700, top: -3900, bottom: -2200 }, target: 18 },
+  ],
+} as const;
+
+export const POST_FIRST_EVOLUTION_EGG_POSITIONS: Point[] = [
+  { x: 2700, y: 2700 }, { x: 2920, y: 2580 }, { x: 3160, y: 2660 },
+  { x: 3380, y: 2500 }, { x: 2550, y: 2380 }, { x: 2800, y: 2200 },
+  { x: 3250, y: 2180 }, { x: 3650, y: 2050 }, { x: 2350, y: 1950 },
+  { x: 3500, y: 1800 },
+];
+
+export const GOLD_MINE_CONFIG = {
+  center: { x: 3100, y: -3100 },
+  initialEggCount: 18,
+  maxEggs: 18,
+  respawnMin: 0.8,
+  respawnMax: 2.2,
+  positions: [
+    { x: 2550, y: -3100 }, { x: 2720, y: -3300 }, { x: 2920, y: -3180 },
+    { x: 3120, y: -3380 }, { x: 3340, y: -3200 }, { x: 3550, y: -3050 },
+    { x: 3750, y: -3300 }, { x: 2450, y: -3500 }, { x: 2700, y: -3650 },
+    { x: 3000, y: -3600 }, { x: 3280, y: -3700 }, { x: 3550, y: -3550 },
+    { x: 3900, y: -3500 }, { x: 2600, y: -2800 }, { x: 2900, y: -2700 },
+    { x: 3200, y: -2780 }, { x: 3500, y: -2850 }, { x: 3800, y: -2750 },
   ],
 } as const;
 
@@ -71,4 +95,5 @@ export const INITIAL_EGG_POSITIONS: Point[] = [
 
 export const NEST_INTERACTION_RADIUS = 170;
 export const FOLLOW_DISTANCE = 68;
+export const ENEMY_EGG_CAPACITY = 8;
 export const DEBUG_OPEN_UPGRADE_MENU = false;
