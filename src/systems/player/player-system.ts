@@ -8,6 +8,8 @@ export type PlayerSystemDependencies = {
   evolutionFrames: Texture[];
   cloudTexture: Texture;
   getStageIndex: () => number;
+  getSpeedMultiplier?: () => number;
+  getPickupRangeMultiplier?: () => number;
 };
 
 export function createPlayerSystem(deps: PlayerSystemDependencies) {
@@ -32,6 +34,56 @@ export function createPlayerSystem(deps: PlayerSystemDependencies) {
   deps.world.addChild(player);
 
   const upgrades: PlayerUpgrades = { speed: 280, pickupRadius: 92 };
+  const getSpeedMultiplier = () => deps.getSpeedMultiplier?.() ?? 1;
+  const getPickupRangeMultiplier = () => deps.getPickupRangeMultiplier?.() ?? 1;
+  let displayedPickupRange = upgrades.pickupRadius * getPickupRangeMultiplier();
+  let pickupRangeTarget = displayedPickupRange;
+  let pickupRangeTransitionElapsed = 1;
+  let pickupRangeTransitionDuration = 0.26;
+  let pickupRangeTransitionFrom = displayedPickupRange;
+  let pickupRangePulse = 0;
+
+  function getFinalPickupRange() {
+    return upgrades.pickupRadius * getPickupRangeMultiplier();
+  }
+
+  function drawPickupIndicator(pickupRange: number) {
+    pickupIndicator.clear();
+    const rangeActive = getPickupRangeMultiplier() > 1.01;
+    if (rangeActive) {
+      pickupIndicator
+        .circle(0, 0, pickupRange)
+        .stroke({
+          color: 0xffffff,
+          alpha: Math.min(1, 0.86 + pickupRangePulse * 0.14),
+          width: 4.5,
+        });
+      pickupIndicator.alpha = 1;
+      return;
+    }
+    const segments = 36;
+    for (let i = 0; i < segments; i += 2) {
+      const start = (i / segments) * Math.PI * 2;
+      const end = ((i + 1) / segments) * Math.PI * 2;
+      pickupIndicator.moveTo(Math.cos(start) * pickupRange, Math.sin(start) * pickupRange);
+      pickupIndicator.arc(0, 0, pickupRange, start, end)
+        .stroke({
+          color: 0xffffd2,
+          alpha: Math.min(1, 0.72 + pickupRangePulse * 0.28),
+          width: 3.5,
+        });
+    }
+    pickupIndicator.alpha = 1;
+  }
+
+  function beginPickupRangeTransition(duration = 0.26) {
+    const target = getFinalPickupRange();
+    if (Math.abs(target - pickupRangeTarget) < 0.01) return;
+    pickupRangeTransitionFrom = displayedPickupRange;
+    pickupRangeTarget = target;
+    pickupRangeTransitionElapsed = 0;
+    pickupRangeTransitionDuration = duration;
+  }
 
   function redraw() {
     const stage = STAGES[Math.min(deps.getStageIndex(), STAGES.length - 1)];
@@ -54,22 +106,40 @@ export function createPlayerSystem(deps: PlayerSystemDependencies) {
       .ellipse(14 * stage.scale, -7 * stage.scale, 6, 10)
       .fill(0x18263b);
     player.scale.set(1);
-    pickupIndicator.clear();
-    const segments = 36;
-    for (let i = 0; i < segments; i += 2) {
-      const start = (i / segments) * Math.PI * 2;
-      const end = ((i + 1) / segments) * Math.PI * 2;
-      pickupIndicator.moveTo(Math.cos(start) * upgrades.pickupRadius, Math.sin(start) * upgrades.pickupRadius);
-      pickupIndicator.arc(0, 0, upgrades.pickupRadius, start, end)
-        .stroke({ color: 0xfff2a6, alpha: 0.9, width: 3 });
+    beginPickupRangeTransition();
+    drawPickupIndicator(displayedPickupRange);
+  }
+
+  function updatePickupRangeIndicator(dt: number) {
+    const target = getFinalPickupRange();
+    if (Math.abs(target - pickupRangeTarget) >= 0.01) {
+      pickupRangeTransitionFrom = displayedPickupRange;
+      pickupRangeTarget = target;
+      pickupRangeTransitionElapsed = 0;
+      pickupRangeTransitionDuration = target > displayedPickupRange ? 0.26 : 0.3;
     }
-    pickupIndicator.alpha = 0.48;
+    if (pickupRangeTransitionElapsed < 1) {
+      pickupRangeTransitionElapsed = Math.min(
+        1,
+        pickupRangeTransitionElapsed + dt / pickupRangeTransitionDuration,
+      );
+      const progress = pickupRangeTransitionElapsed;
+      const eased = 1 - (1 - progress) ** 3;
+      displayedPickupRange = pickupRangeTransitionFrom +
+        (pickupRangeTarget - pickupRangeTransitionFrom) * eased;
+    }
+    pickupRangePulse = Math.max(0, pickupRangePulse - dt * 4.5);
+    drawPickupIndicator(displayedPickupRange);
+  }
+
+  function pulsePickupRangeIndicator() {
+    pickupRangePulse = 1;
   }
 
   function move(inputX: number, inputY: number, dt: number, blocked: boolean) {
     if (!blocked) {
-      player.x += inputX * upgrades.speed * dt;
-      player.y += inputY * upgrades.speed * dt;
+      player.x += inputX * upgrades.speed * getSpeedMultiplier() * dt;
+      player.y += inputY * upgrades.speed * getSpeedMultiplier() * dt;
     }
     player.x = Math.max(PLAYABLE_BOUNDS.left, Math.min(PLAYABLE_BOUNDS.right, player.x));
     player.y = Math.max(PLAYABLE_BOUNDS.top, Math.min(PLAYABLE_BOUNDS.bottom, player.y));
@@ -83,5 +153,17 @@ export function createPlayerSystem(deps: PlayerSystemDependencies) {
     player.rotation = Math.sin(time * 8) * 0.035 * Math.min(1, inputMagnitude);
   }
 
-  return { player, playerEvolution, playerCloud, pickupIndicator, upgrades, redraw, move, updateIdleVisual };
+  return {
+    player,
+    playerEvolution,
+    playerCloud,
+    pickupIndicator,
+    upgrades,
+    redraw,
+    move,
+    updateIdleVisual,
+    updatePickupRangeIndicator,
+    pulsePickupRangeIndicator,
+    getFinalPickupRange,
+  };
 }

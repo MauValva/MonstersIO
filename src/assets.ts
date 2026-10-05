@@ -9,6 +9,7 @@ export const ORIGINAL_ASSETS = {
   upgradeUi: './assets/Arts/UI/UI_Upgrades.png',
   upgradeBase: './assets/Arts/Environment/UpgradeBase.png',
   eggs: './assets/Arts/Eggs/spr_Eggs.png',
+  features: './assets/Arts/Eggs/Features.png',
   plant: './assets/Arts/Environment/Plant.png',
   hud: './assets/Arts/UI/UI_HUD.png',
 } as const;

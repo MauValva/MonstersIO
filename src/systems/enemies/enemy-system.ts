@@ -10,6 +10,7 @@ export type Enemy = {
   cloud: Sprite;
   eggs: Container[];
   target: Container | null;
+  interestTarget: Point | null;
   speed: number;
   homeBase: Container;
   dazedUntil: number;
@@ -22,7 +23,12 @@ type EnemyDepositAnimation = { enemy: Enemy; eggs: Container[]; elapsed: number 
 export type EnemyEggApi = {
   eggs: Container[];
   carriedEggs: Container[];
+  getEggData: (egg: Container) => {
+    type: "NORMAL" | "COIN";
+    source: "WORLD" | "CLUSTER" | "FUGITIVE" | "FUGITIVE_JACKPOT" | "GOLD_MINE";
+  };
   addCarriedEgg: (egg: Container) => void;
+  takeCarriedEggs: (predicate: (egg: Container) => boolean) => Container[];
   takeAllCarriedEggs: () => Container[];
   releaseEgg: (egg: Container) => void;
   setEggWorldSpriteScale: (egg: Container) => void;
@@ -39,12 +45,25 @@ export type EnemySystemDependencies = {
   getPlayerPosition: () => Point;
   getTime: () => number;
   getCarriedEggScale: () => number;
+  getWorldInterest?: (enemyPosition: Point) => {
+    position: Point;
+    strength: number;
+    radius: number;
+    type: string;
+  } | null;
   onRedIntroSteal: () => void;
   onEnemyCollectedEgg: () => void;
   onPlayerCarriedCountChanged: (count: number) => void;
 };
 
 export function createEnemySystem(deps: EnemySystemDependencies) {
+  const isEnemyCollectibleEgg = (egg: Container) => {
+    const data = deps.eggSystem.getEggData(egg);
+    // Only the regular egg layer is eligible for rivals. The explicit
+    // source guard keeps the fugitive/event payout path isolated as well.
+    return (data.type === "NORMAL" || data.type === "COIN") && data.source !== "FUGITIVE";
+  };
+
   function createEnemyBase(position: Point, color: number, artTexture: Texture) {
     const enemyBase = new Container();
     enemyBase.position.set(position.x, position.y);
@@ -91,7 +110,7 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
     deps.world.addChild(container);
     container.visible = false;
     return {
-      container, body, eyes, art, cloud, eggs: [], target: null,
+      container, body, eyes, art, cloud, eggs: [], target: null, interestTarget: null,
       speed: 155, homeBase, dazedUntil: 0, collected: 0, depositing: false,
     };
   }
@@ -124,24 +143,60 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
     // target selected while pursuing, otherwise the rival can continue along
     // the direction where the player disappeared.
     if (chasingPlayer) enemy.target = null;
+    if (chasingPlayer) enemy.interestTarget = null;
+    if (!chasingPlayer) enemy.interestTarget = null;
     if (enemy.eggs.length >= ENEMY_EGG_CAPACITY) enemy.target = null;
-    if (!chasingPlayer && enemy.eggs.length < ENEMY_EGG_CAPACITY && (!enemy.target || !enemy.target.visible || enemy.target.parent !== deps.eggLayer)) {
-      enemy.target = null;
-      let nearestDistance = Infinity;
-      for (const egg of deps.eggSystem.eggs) {
-        if (!egg.visible || egg.parent !== deps.eggLayer) continue;
-        const candidateDistance = Math.hypot(enemy.container.x - egg.x, enemy.container.y - egg.y);
-        if (candidateDistance < nearestDistance) {
-          nearestDistance = candidateDistance;
-          enemy.target = egg;
+    if (!chasingPlayer && enemy.eggs.length < ENEMY_EGG_CAPACITY) {
+      let nearestDistance = enemy.target &&
+        enemy.target.visible &&
+        enemy.target.parent === deps.eggLayer &&
+        isEnemyCollectibleEgg(enemy.target)
+        ? Math.hypot(enemy.container.x - enemy.target.x, enemy.container.y - enemy.target.y)
+        : Infinity;
+      if (nearestDistance === Infinity) enemy.target = null;
+      if (!enemy.target) {
+        let closestEgg: Container | null = null;
+
+        for (const egg of deps.eggSystem.eggs) {
+          if (!egg.visible || egg.parent !== deps.eggLayer) continue;
+          // Rivals can still collect regular and coin eggs, but never the
+          // fugitive/event egg. Special power-ups live in another layer.
+          if (!isEnemyCollectibleEgg(egg)) continue;
+          const candidateDistance = Math.hypot(enemy.container.x - egg.x, enemy.container.y - egg.y);
+          if (candidateDistance < nearestDistance) {
+            nearestDistance = candidateDistance;
+            closestEgg = egg;
+          }
         }
+        enemy.target = closestEgg;
+      }
+      const interest = deps.getWorldInterest?.({
+        x: enemy.container.x,
+        y: enemy.container.y,
+      });
+      if (
+        interest &&
+        Math.hypot(
+          interest.position.x - enemy.container.x,
+          interest.position.y - enemy.container.y,
+        ) <= interest.radius
+      ) {
+        const interestPriority = interest.strength * 700;
+        if (!enemy.target || nearestDistance > interestPriority) {
+          enemy.target = null;
+          enemy.interestTarget = { ...interest.position };
+        } else {
+          enemy.interestTarget = null;
+        }
+      } else {
+        enemy.interestTarget = null;
       }
     }
     const destination = chasingPlayer
       ? deps.getPlayerPosition()
       : enemy.eggs.length >= ENEMY_EGG_CAPACITY
         ? enemy.homeBase.position
-        : enemy.target?.position;
+        : enemy.target?.position ?? enemy.interestTarget;
     if (destination) {
       const dx = destination.x - enemy.container.x;
       const dy = destination.y - enemy.container.y;
@@ -154,7 +209,12 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
     }
     enemy.container.x = Math.max(PLAYABLE_BOUNDS.left, Math.min(PLAYABLE_BOUNDS.right, enemy.container.x));
     enemy.container.y = Math.max(PLAYABLE_BOUNDS.top, Math.min(PLAYABLE_BOUNDS.bottom, enemy.container.y));
-    if (enemy.target && enemy.target.parent === deps.eggLayer && Math.hypot(enemy.container.x - enemy.target.x, enemy.container.y - enemy.target.y) < 72) {
+    if (
+      enemy.target &&
+      enemy.target.parent === deps.eggLayer &&
+      isEnemyCollectibleEgg(enemy.target) &&
+      Math.hypot(enemy.container.x - enemy.target.x, enemy.target.y - enemy.container.y) < 72
+    ) {
       const egg = enemy.target;
       deps.eggLayer.removeChild(egg);
       egg.scale.set(deps.getCarriedEggScale() * 0.84);
@@ -209,11 +269,14 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
           ) < 72;
         const playerQueueEgg = deps.eggSystem.carriedEggs.find(
           (egg) =>
-            enemyNearPlayer ||
-            Math.hypot(enemy.container.x - egg.x, enemy.container.y - egg.y) < 54,
+            isEnemyCollectibleEgg(egg) &&
+            (enemyNearPlayer ||
+              Math.hypot(enemy.container.x - egg.x, enemy.container.y - egg.y) < 54)
         );
         if (playerQueueEgg) {
-          enemy.eggs.push(...deps.eggSystem.takeAllCarriedEggs());
+          enemy.eggs.push(...deps.eggSystem.takeCarriedEggs(
+            isEnemyCollectibleEgg,
+          ));
           deps.onPlayerCarriedCountChanged(deps.eggSystem.carriedEggs.length);
           if (enemy === enemies[0]) deps.onRedIntroSteal();
         }
