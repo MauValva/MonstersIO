@@ -2,6 +2,7 @@
 export const ORIGINAL_ASSETS = {
   ground: './assets/Arts/Environment/Tile_Ground_V2.png',
   nest: './assets/Arts/Environment/Nest_Player.png',
+  worldAtlas: './assets/Arts/Environment/EggMineWaterWorld.png',
   enemyNest: './assets/Arts/Environment/enemyNest.png',
   player: './assets/Arts/Player/Player_EvoMonster.png',
   cloud: './assets/Arts/Player/PlayerCloud.png',
@@ -11,7 +12,9 @@ export const ORIGINAL_ASSETS = {
   eggs: './assets/Arts/Eggs/spr_Eggs.png',
   features: './assets/Arts/Eggs/Features.png',
   plant: './assets/Arts/Environment/Plant.png',
+  edgeStone: './assets/Arts/Environment/EdgeStone.png',
   hud: './assets/Arts/UI/UI_HUD.png',
+  evolutionUi: './assets/Arts/UI/UI_Evolution.png',
 } as const;
 
 // Revert any derivative independently by deleting its override below.

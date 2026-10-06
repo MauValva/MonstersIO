@@ -121,26 +121,32 @@ async function bootstrap() {
   const [
     groundAtlas,
     nestTexture,
+    worldAtlasTexture,
     enemyNestTexture,
     playerEvolutionTexture,
     playerCloudTexture,
     enemyTexture,
     eggTexture,
     plantTexture,
+    edgeStoneTexture,
     hudTexture,
     featuresTexture,
+    evolutionUiTexture,
   ] = await Promise.all(
     [
       GAME_ASSETS.ground,
       GAME_ASSETS.nest,
+      GAME_ASSETS.worldAtlas,
       GAME_ASSETS.enemyNest,
       GAME_ASSETS.player,
       GAME_ASSETS.cloud,
       GAME_ASSETS.enemy,
       GAME_ASSETS.eggs,
       GAME_ASSETS.plant,
+      GAME_ASSETS.edgeStone,
       GAME_ASSETS.hud,
       GAME_ASSETS.features,
+      GAME_ASSETS.evolutionUi,
     ].map((path) => Assets.load<Texture>(path)),
   );
   const { obstacles, bushes } = createWorldScene(
@@ -148,9 +154,13 @@ async function bootstrap() {
     groundAtlas,
     GAME_ASSETS.ground,
     plantTexture,
+    edgeStoneTexture,
   );
   const evolutionColumns = 5;
   const evolutionRows = 2;
+  // Keep linear texture filtering from sampling the neighboring evolution
+  // sprites at the atlas borders (especially noticeable on evolution 7).
+  const evolutionFramePadding = 8;
   const evolutionFrameWidth = playerEvolutionTexture.width / evolutionColumns;
   const evolutionFrameHeight = playerEvolutionTexture.height / evolutionRows;
   const evolutionArtTopFractions = [
@@ -165,13 +175,67 @@ async function bootstrap() {
     return new Texture({
       source: playerEvolutionTexture.source,
       frame: new Rectangle(
-        column * evolutionFrameWidth,
-        row * evolutionFrameHeight,
-        evolutionFrameWidth,
-        evolutionFrameHeight,
+        column * evolutionFrameWidth + evolutionFramePadding,
+        row * evolutionFrameHeight + evolutionFramePadding,
+        evolutionFrameWidth - evolutionFramePadding * 2,
+        evolutionFrameHeight - evolutionFramePadding * 2,
       ),
     });
   });
+  // EggMineWaterWorld.png contains three independent environment artworks:
+  // Egg Mine, the portal, and the locked Water World sign.
+  const worldAtlasFrame = (x: number, y: number, width: number, height: number) =>
+    new Texture({
+      source: worldAtlasTexture.source,
+      frame: new Rectangle(x, y, width, height),
+    });
+  const worldAtlasTextures = {
+    eggMine: worldAtlasFrame(0, 0, 350, 309),
+    portal: worldAtlasFrame(350, 0, 350, 309),
+    waterWorld: worldAtlasFrame(670, 0, 354, 309),
+  };
+  // These markers sit halfway along the route from the player's Nest toward
+  // the rival Nests. They are introduced together with the upgrade station.
+  const eggMineMarkers = new Container();
+  const eggMineMarkerPositions = [
+    { x: 1400, y: 1800 },
+    { x: 3100, y: 1800 },
+    { x: 4800, y: 1800 },
+  ];
+  for (const position of eggMineMarkerPositions) {
+    const eggMineMarker = new Sprite(worldAtlasTextures.eggMine);
+    eggMineMarker.anchor.set(0.5, 1);
+    eggMineMarker.position.set(position.x, position.y);
+    eggMineMarker.width = 250;
+    eggMineMarker.height = 221;
+    eggMineMarkers.addChild(eggMineMarker);
+  }
+  eggMineMarkers.visible = false;
+  const waterWorldMarker = new Sprite(worldAtlasTextures.waterWorld);
+  waterWorldMarker.anchor.set(0.5);
+  waterWorldMarker.position.set(3100, 4085);
+  waterWorldMarker.width = 205;
+  waterWorldMarker.height = 179;
+  const waterWorldCounter = new Text({
+    text: "1/10",
+    style: new TextStyle({
+      fontFamily: "Arial",
+      fontSize: 19,
+      fontWeight: "900",
+      fill: 0x050505,
+    }),
+  });
+  waterWorldCounter.anchor.set(0.5);
+  // Ajuste manual do contador da placa Water World.
+  const WATER_WORLD_COUNTER_X = 3115;
+  const WATER_WORLD_COUNTER_Y = 4097;
+  const WATER_WORLD_COUNTER_ROTATION = -0.12;
+  waterWorldCounter.position.set(
+    WATER_WORLD_COUNTER_X,
+    WATER_WORLD_COUNTER_Y,
+  );
+  waterWorldCounter.rotation = WATER_WORLD_COUNTER_ROTATION;
+  world.addChild(waterWorldMarker, waterWorldCounter, eggMineMarkers);
   const enemyFrames = gridTextures(enemyTexture, GAME_ASSETS.enemy, 2, 1);
   const enemyNestFrames = gridTextures(
     enemyNestTexture,
@@ -225,6 +289,28 @@ async function bootstrap() {
     nestArrow: hudFrame(26, 160, 137, 112),
     nestLabel: hudFrame(25, 272, 112, 35),
     full: hudFrame(265, 213, 296, 84),
+    // Hand pointer used by the upgrade tutorial.
+    tutorialHand: hudFrame(258, 180, 95, 115),
+  };
+  // UI_Evolution.png is an atlas containing the banner, the central VFX and
+  // the level plate. Keep the crops here so the overlay can compose them
+  // independently around the monster while preserving the supplied artwork.
+  const evolutionUiFrame = (
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) =>
+    new Texture({
+      source: evolutionUiTexture.source,
+      frame: new Rectangle(x, y, width, height),
+    });
+  const evolutionUiFrames = {
+    banner: evolutionUiFrame(44, 0, 630, 286),
+    // Start below the ribbon's lower edge so no banner artwork bleeds into
+    // the decorative VFX layer.
+    vfx: evolutionUiFrame(0, 300, 717, 602),
+    levelPlate: evolutionUiFrame(177, 910, 365, 108),
   };
   const eggColumns = 5;
   const eggRows = 3;
@@ -237,7 +323,12 @@ async function bootstrap() {
   // Features.png is a compact art sheet for the special eggs and the mine.
   // Keep each crop in one place so gameplay systems only receive the visual
   // that belongs to their placeholder.
-  const featureTexture = (x: number, y: number, width: number, height: number) =>
+  const featureTexture = (
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+  ) =>
     new Texture({
       source: featuresTexture.source,
       frame: new Rectangle(x, y, width, height),
@@ -345,12 +436,18 @@ async function bootstrap() {
     },
     getDefinition: (type) => powerUpManager.getDefinition(type),
   });
-  const normalPowerUpEntities = new Map<SpecialEggType, typeof specialEggSystem.entities[number]>();
+  const normalPowerUpEntities = new Map<
+    SpecialEggType,
+    (typeof specialEggSystem.entities)[number]
+  >();
   const pendingNormalPowerUpRespawns = new Set<SpecialEggType>();
   let initialPowerUpsSpawned = false;
   let evolution3FugitiveTriggered = false;
   let firstGoldMineSpawned = false;
-  let goldMineTargetRegion: import("./config/level-design-config").LogicalRegion | null = null;
+  let eggMineMarkersRetired = false;
+  let goldMineTargetRegion:
+    | import("./config/level-design-config").LogicalRegion
+    | null = null;
   let previousLogicalRegion = getLogicalRegion({ x: 3000, y: 3300 });
   const progression = createProgressionSystem();
   const powerUpManager = createPowerUpManager();
@@ -396,8 +493,11 @@ async function bootstrap() {
 
   function updateMagnetAttraction(dt: number, time: number) {
     const definition = SPECIAL_EGG_CONFIG.magnet;
-    const magnetActive = powerUpManager.getActive(SpecialEggType.Magnet) !== undefined;
-    const pickupRange = upgrades.pickupRadius * powerUpManager.getModifiers().pickupRangeMultiplier;
+    const magnetActive =
+      powerUpManager.getActive(SpecialEggType.Magnet) !== undefined;
+    const pickupRange =
+      upgrades.pickupRadius *
+      powerUpManager.getModifiers().pickupRangeMultiplier;
     const magnetRadius = pickupRange * definition.magnetRadiusMultiplier;
     const magnetRadiusSquared = magnetRadius * magnetRadius;
     const playerPosition = player.position;
@@ -429,11 +529,17 @@ async function bootstrap() {
       const dy = playerPosition.y - egg.y;
       const distance = Math.hypot(dx, dy);
       if (distance <= pickupRange || distance < 0.001) continue;
-      const attractionFactor = Math.max(0, Math.min(1, 1 - distance / magnetRadius));
-      const attractionSpeed = definition.minAttractionSpeed +
-        (definition.maxAttractionSpeed - definition.minAttractionSpeed) * attractionFactor;
+      const attractionFactor = Math.max(
+        0,
+        Math.min(1, 1 - distance / magnetRadius),
+      );
+      const attractionSpeed =
+        definition.minAttractionSpeed +
+        (definition.maxAttractionSpeed - definition.minAttractionSpeed) *
+          attractionFactor;
       const step = Math.min(distance, attractionSpeed * dt);
-      const wobble = Math.sin(time * 7 + state.phase) * Math.min(8, distance * 0.025);
+      const wobble =
+        Math.sin(time * 7 + state.phase) * Math.min(8, distance * 0.025);
       egg.x += (dx / distance) * step + (-dy / distance) * wobble * dt;
       egg.y += (dy / distance) * step + (dx / distance) * wobble * dt;
       egg.rotation += dt * 4;
@@ -531,13 +637,11 @@ async function bootstrap() {
   const magnetPulseLayer = new Container();
   world.addChildAt(magnetPulseLayer, world.getChildIndex(eggLayer));
   const magnetPulses: MagnetPulse[] = Array.from({ length: 4 }, () => {
-    const ring = new Graphics()
-      .circle(0, 0, 1)
-      .stroke({
-        color: SPECIAL_EGG_CONFIG.magnet.visual.color,
-        alpha: 0.55,
-        width: 2.5,
-      });
+    const ring = new Graphics().circle(0, 0, 1).stroke({
+      color: SPECIAL_EGG_CONFIG.magnet.visual.color,
+      alpha: 0.55,
+      width: 2.5,
+    });
     ring.visible = false;
     magnetPulseLayer.addChild(ring);
     return {
@@ -558,7 +662,9 @@ async function bootstrap() {
     const pulseConfig = definition.visual;
     const target = magnetPulses.find((pulse) => !pulse.active);
     if (!target) return;
-    const pickupRange = upgrades.pickupRadius * powerUpManager.getModifiers().pickupRangeMultiplier;
+    const pickupRange =
+      upgrades.pickupRadius *
+      powerUpManager.getModifiers().pickupRangeMultiplier;
     target.elapsed = 0;
     target.duration = pulseConfig.pulseDuration;
     target.startRadius = pickupRange * definition.magnetRadiusMultiplier;
@@ -573,7 +679,8 @@ async function bootstrap() {
   function updateMagnetPulseVfx(dt: number, time: number) {
     const definition = SPECIAL_EGG_CONFIG.magnet;
     const pulseConfig = definition.visual;
-    const magnetActive = powerUpManager.getActive(SpecialEggType.Magnet) !== undefined;
+    const magnetActive =
+      powerUpManager.getActive(SpecialEggType.Magnet) !== undefined;
     if (magnetActive && pulseConfig.pulseEnabled) {
       magnetPulseElapsed += dt;
       if (magnetPulseElapsed >= pulseConfig.pulseInterval) {
@@ -592,19 +699,18 @@ async function bootstrap() {
       pulse.elapsed += dt;
       const progress = Math.min(1, pulse.elapsed / pulse.duration);
       const eased = 1 - (1 - progress) ** 3;
-      const radius = pulse.startRadius + (pulse.maxRadius - pulse.startRadius) * eased;
+      const radius =
+        pulse.startRadius + (pulse.maxRadius - pulse.startRadius) * eased;
       pulse.ring.position.copyFrom(
         magnetPulseLayer.toLocal(player.toGlobal({ x: 0, y: 0 })),
       );
-      const alpha = pulseConfig.startAlpha * pulse.strength * (1 - progress) ** 0.9;
-      pulse.ring
-        .clear()
-        .circle(0, 0, radius)
-        .stroke({
-          color: pulseConfig.color,
-          alpha,
-          width: 2.5,
-        });
+      const alpha =
+        pulseConfig.startAlpha * pulse.strength * (1 - progress) ** 0.9;
+      pulse.ring.clear().circle(0, 0, radius).stroke({
+        color: pulseConfig.color,
+        alpha,
+        width: 2.5,
+      });
       if (progress >= 1) {
         pulse.active = false;
         pulse.ring.visible = false;
@@ -655,7 +761,9 @@ async function bootstrap() {
   let rangeFormationDelivered = false;
   let contextualPowerUpPending: "FUGITIVE" | "GOLD_MINE" | null = null;
   let contextualPowerUpRequestedAt = -Infinity;
-  const sessionTelemetry = createSessionTelemetry(SESSION_PACING_CONFIG.visibleOpportunityCheckInterval);
+  const sessionTelemetry = createSessionTelemetry(
+    SESSION_PACING_CONFIG.visibleOpportunityCheckInterval,
+  );
   if (PACING_DIRECTOR_CONFIG.debug) {
     Object.defineProperty(window, "__monsterDebug", {
       configurable: true,
@@ -681,6 +789,9 @@ async function bootstrap() {
   let cameraShakeTime = 0;
   let cameraShakeDuration = 0;
   let cameraShakeStrength = 0;
+  let cameraPunchTime = 0;
+  let cameraPunchDuration = 0;
+  let cameraPunchStrength = 0;
   let depositing = false;
   let depositElapsed = 0;
   let depositFlightDuration: number = DEPOSIT_FEEDBACK.maxDuration;
@@ -706,6 +817,10 @@ async function bootstrap() {
   let upgradeAssetsReady = false;
   let upgradeUnlockRequested = false;
   let upgradeFtueVisible = false;
+  type UpgradeTutorialStep = 0 | 1 | 2 | 3;
+  // Tutorial progress is scoped to the current game session only.
+  let upgradeTutorialStep: UpgradeTutorialStep = 0;
+  let upgradeTutorialElapsed = 0;
   let upgradeSpawnElapsed = 0;
   let firstUpgradeCompleted = false;
   let firstEnemySeen = false;
@@ -725,18 +840,15 @@ async function bootstrap() {
   const getCurrentVisualScale = () => progression.visualScale;
   const getCarriedEggScale = () =>
     0.67 * Math.min(1.18, 1 + (getCurrentVisualScale() - 1) * 0.38);
-  const getCarriedEggGap = () =>
-    Math.max(
-      10,
-      60 * getCurrentVisualScale(),
-    );
+  const getCarriedEggGap = () => Math.max(10, 60 * getCurrentVisualScale());
   function getOrbitSlotPosition(
     index: number,
     total: number,
     animationTime = time,
   ): Point {
     const orbitConfig = SPECIAL_EGG_CONFIG.orbit;
-    const baseRadius = 45 * getCurrentVisualScale() + 28 + orbitConfig.orbitPadding;
+    const baseRadius =
+      45 * getCurrentVisualScale() + 28 + orbitConfig.orbitPadding;
     let ring = 0;
     let remaining = total;
     let ringSlot = index;
@@ -790,32 +902,54 @@ async function bootstrap() {
     return "FULL_PACING";
   }
 
-  function spawnBasePocket(count: number = EGG_SPAWN_CONFIG.pocketSize, cluster = false) {
-    const movementAngle = Math.hypot(input.x, input.y) > 0.1
-      ? Math.atan2(input.y, input.x)
-      : -Math.PI / 2;
+  function spawnBasePocket(
+    count: number = EGG_SPAWN_CONFIG.pocketSize,
+    cluster = false,
+  ) {
+    const movementAngle =
+      Math.hypot(input.x, input.y) > 0.1
+        ? Math.atan2(input.y, input.x)
+        : -Math.PI / 2;
     const directionOffsets = [0, -0.46, 0.46, Math.PI];
     const candidates: Point[] = [];
-    for (let i = 0; i < directionOffsets.length && candidates.length < count; i += 1) {
+    for (
+      let i = 0;
+      i < directionOffsets.length && candidates.length < count;
+      i += 1
+    ) {
       const angle = movementAngle + directionOffsets[i];
       const distanceFromPlayer =
         EGG_SPAWN_CONFIG.pocketMinDistance +
-        ((i * 137 + Math.floor(time * 10)) % 100) / 100 *
-          (EGG_SPAWN_CONFIG.pocketMaxDistance - EGG_SPAWN_CONFIG.pocketMinDistance);
+        (((i * 137 + Math.floor(time * 10)) % 100) / 100) *
+          (EGG_SPAWN_CONFIG.pocketMaxDistance -
+            EGG_SPAWN_CONFIG.pocketMinDistance);
       const center = {
         x: player.x + Math.cos(angle) * distanceFromPlayer,
         y: player.y + Math.sin(angle) * distanceFromPlayer,
       };
       const position = {
-        x: Math.max(PLAYABLE_BOUNDS.left + 50, Math.min(PLAYABLE_BOUNDS.right - 50, center.x)),
-        y: Math.max(PLAYABLE_BOUNDS.top + 50, Math.min(PLAYABLE_BOUNDS.bottom - 50, center.y)),
+        x: Math.max(
+          PLAYABLE_BOUNDS.left + 50,
+          Math.min(PLAYABLE_BOUNDS.right - 50, center.x),
+        ),
+        y: Math.max(
+          PLAYABLE_BOUNDS.top + 50,
+          Math.min(PLAYABLE_BOUNDS.bottom - 50, center.y),
+        ),
       };
       if (!isOffscreenSafeOpportunityPosition(position)) continue;
-      if (eggSystem.getActiveWorldEggs().some((egg) => distance(position, egg.position) < 180)) continue;
+      if (
+        eggSystem
+          .getActiveWorldEggs()
+          .some((egg) => distance(position, egg.position) < 180)
+      )
+        continue;
       candidates.push(position);
     }
     for (let i = 0; i < candidates.length; i += 1) {
-      const offset = cluster ? { x: (i - (candidates.length - 1) / 2) * 105, y: (i % 2) * 42 } : { x: 0, y: 0 };
+      const offset = cluster
+        ? { x: (i - (candidates.length - 1) / 2) * 105, y: (i % 2) * 42 }
+        : { x: 0, y: 0 };
       eggSystem.spawnEgg(
         { x: candidates[i].x + offset.x, y: candidates[i].y + offset.y },
         progression.stageIndex,
@@ -831,23 +965,48 @@ async function bootstrap() {
     worldPopulationElapsed += dt;
     visibleOpportunityElapsed += dt;
 
-    if (!firstClusterDelivered && time >= SESSION_PACING_CONFIG.firstClusterMinTime) {
-      if (time >= SESSION_PACING_CONFIG.firstClusterMaxTime || eggSystem.getActiveWorldEggs().length < EGG_SPAWN_CONFIG.baselineTarget) {
+    if (
+      !firstClusterDelivered &&
+      time >= SESSION_PACING_CONFIG.firstClusterMinTime
+    ) {
+      if (
+        time >= SESSION_PACING_CONFIG.firstClusterMaxTime ||
+        eggSystem.getActiveWorldEggs().length < EGG_SPAWN_CONFIG.baselineTarget
+      ) {
         firstClusterDelivered = spawnBasePocket(3, true) > 0;
-        if (firstClusterDelivered) sessionTelemetry.record(time, "CLUSTER_SPAWNED", "MEDIUM", "opening");
+        if (firstClusterDelivered)
+          sessionTelemetry.record(time, "CLUSTER_SPAWNED", "MEDIUM", "opening");
       }
     }
 
-    if (worldPopulationElapsed < EGG_SPAWN_CONFIG.populationCheckInterval) return;
+    if (worldPopulationElapsed < EGG_SPAWN_CONFIG.populationCheckInterval)
+      return;
     worldPopulationElapsed = 0;
     const activeEggs = eggSystem.getActiveWorldEggs();
-    const visibleEggs = activeEggs.filter((egg) => isVisibleOpportunityPosition(egg.position)).length;
-    const nearbyEggs = activeEggs.filter((egg) => distance(player.position, egg.position) < 1150).length;
-    const shouldFillLocalFloor = visibleEggs < EGG_SPAWN_CONFIG.visibleFloor && nearbyEggs < EGG_SPAWN_CONFIG.nearbyFloor;
-    const shouldMaintainBaseline = activeEggs.length < EGG_SPAWN_CONFIG.baselineTarget;
-    const eventBusy = depositing || evolving || goldMineIntroduced &&
-      ["ACTIVE", "EXTRACTING", "FINAL_JACKPOT"].includes(goldMineSystem.getSnapshot().state);
-    if (!eventBusy && time - lastPopulationSpawnTime > EGG_SPAWN_CONFIG.populationCheckInterval && (shouldFillLocalFloor || shouldMaintainBaseline)) {
+    const visibleEggs = activeEggs.filter((egg) =>
+      isVisibleOpportunityPosition(egg.position),
+    ).length;
+    const nearbyEggs = activeEggs.filter(
+      (egg) => distance(player.position, egg.position) < 1150,
+    ).length;
+    const shouldFillLocalFloor =
+      visibleEggs < EGG_SPAWN_CONFIG.visibleFloor &&
+      nearbyEggs < EGG_SPAWN_CONFIG.nearbyFloor;
+    const shouldMaintainBaseline =
+      activeEggs.length < EGG_SPAWN_CONFIG.baselineTarget;
+    const eventBusy =
+      depositing ||
+      evolving ||
+      (goldMineIntroduced &&
+        ["ACTIVE", "EXTRACTING", "FINAL_JACKPOT"].includes(
+          goldMineSystem.getSnapshot().state,
+        ));
+    if (
+      !eventBusy &&
+      time - lastPopulationSpawnTime >
+        EGG_SPAWN_CONFIG.populationCheckInterval &&
+      (shouldFillLocalFloor || shouldMaintainBaseline)
+    ) {
       spawnBasePocket(shouldFillLocalFloor ? 3 : 2, false);
       visibleOpportunityElapsed = 0;
     }
@@ -892,10 +1051,11 @@ async function bootstrap() {
     // Use a perfectly symmetric ring and ensure its circumference can fit
     // every egg with the configured minimum separation. The ring expands on
     // each successive payout wave.
-    const minimumSymmetricRadius = spawnCount > 1
-      ? GOLD_MINE_CONFIG.minimumEggSeparation /
-        (2 * Math.sin(Math.PI / spawnCount))
-      : 0;
+    const minimumSymmetricRadius =
+      spawnCount > 1
+        ? GOLD_MINE_CONFIG.minimumEggSeparation /
+          (2 * Math.sin(Math.PI / spawnCount))
+        : 0;
     const ringRadius = Math.max(targetRadius, minimumSymmetricRadius);
     for (let i = 0; i < spawnCount; i += 1) {
       const baseAngle =
@@ -905,18 +1065,13 @@ async function bootstrap() {
         x: payout.position.x + Math.cos(baseAngle) * ringRadius,
         y: payout.position.y + Math.sin(baseAngle) * ringRadius,
       };
-      const isCoin =
-        i >= coinStart;
-      const egg = eggSystem.spawnEgg(
-        payout.position,
-        progression.stageIndex,
-        {
-          type: isCoin ? "COIN" : "NORMAL",
-          coinValue: isCoin ? 10 : 1,
-          progressionValue: 1,
-          source: "GOLD_MINE",
-        },
-      );
+      const isCoin = i >= coinStart;
+      const egg = eggSystem.spawnEgg(payout.position, progression.stageIndex, {
+        type: isCoin ? "COIN" : "NORMAL",
+        coinValue: isCoin ? 10 : 1,
+        progressionValue: 1,
+        source: "GOLD_MINE",
+      });
       const launchAngle = Math.atan2(
         landingPosition.y - payout.position.y,
         landingPosition.x - payout.position.x,
@@ -949,7 +1104,10 @@ async function bootstrap() {
     }
     goldMineWaveStrength = payout.final ? 1.4 : 0.7 + payout.waveIndex * 0.12;
     pickupFlash = payout.final ? 0.5 : 0.24;
-    shakeCamera(payout.final ? 0.5 : 0.16, payout.final ? 9 : 3 + payout.waveIndex);
+    shakeCamera(
+      payout.final ? 0.5 : 0.16,
+      payout.final ? 9 : 3 + payout.waveIndex,
+    );
   }
 
   const goldMineSystem = createGoldMineSystem({
@@ -967,10 +1125,12 @@ async function bootstrap() {
     layer: fugitiveLayer,
     texture: featureTextures.fugitive,
     getPlayerPosition: () => player.position,
-    getPlayerSpeed: () => upgrades.speed * powerUpManager.getModifiers().speedMultiplier,
+    getPlayerSpeed: () =>
+      upgrades.speed * powerUpManager.getModifiers().speedMultiplier,
     onCapture: (position) => spawnFugitiveJackpot(position),
     onEscape: (position) => {
-      if (PACING_DIRECTOR_CONFIG.debug) console.debug("[FUGITIVE] Escaped", { position });
+      if (PACING_DIRECTOR_CONFIG.debug)
+        console.debug("[FUGITIVE] Escaped", { position });
     },
     debug: PACING_DIRECTOR_CONFIG.debug,
   });
@@ -1308,7 +1468,9 @@ async function bootstrap() {
       const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.24;
       const distanceFromCenter =
         FUGITIVE_EGG_CONFIG.jackpotMinRadius +
-        Math.random() * (FUGITIVE_EGG_CONFIG.jackpotMaxRadius - FUGITIVE_EGG_CONFIG.jackpotMinRadius);
+        Math.random() *
+          (FUGITIVE_EGG_CONFIG.jackpotMaxRadius -
+            FUGITIVE_EGG_CONFIG.jackpotMinRadius);
       const egg = eggSystem.spawnEgg(
         {
           x: position.x + Math.cos(angle) * distanceFromCenter * 0.55,
@@ -1342,7 +1504,8 @@ async function bootstrap() {
   }
 
   function spawnFugitiveExplosion(position: Point) {
-    for (const particle of fugitiveExplosionParticles) particle.sprite.destroy();
+    for (const particle of fugitiveExplosionParticles)
+      particle.sprite.destroy();
     fugitiveExplosionParticles.length = 0;
     fugitiveExplosionElapsed = 0;
     fugitiveExplosionFlash.position.set(position.x, position.y);
@@ -1370,18 +1533,33 @@ async function bootstrap() {
   }
 
   function updateFugitiveExplosion(dt: number) {
-    if (fugitiveExplosionElapsed >= 0.95 && fugitiveExplosionParticles.length === 0) return;
+    if (
+      fugitiveExplosionElapsed >= 0.95 &&
+      fugitiveExplosionParticles.length === 0
+    )
+      return;
     fugitiveExplosionElapsed += dt;
     const progress = Math.min(1, fugitiveExplosionElapsed / 0.95);
     const eased = 1 - (1 - progress) ** 3;
     fugitiveExplosionFlash
       .clear()
       .circle(0, 0, 24 + eased * 92)
-      .fill({ color: 0xfff5d0, alpha: Math.max(0, 0.62 * (1 - progress) ** 1.7) });
+      .fill({
+        color: 0xfff5d0,
+        alpha: Math.max(0, 0.62 * (1 - progress) ** 1.7),
+      });
     fugitiveExplosionRing
       .clear()
       .circle(0, 0, 30 + eased * 175)
-      .stroke({ color: FUGITIVE_RAINBOW_COLORS[Math.floor(fugitiveExplosionElapsed * 18) % FUGITIVE_RAINBOW_COLORS.length], alpha: Math.max(0, 0.9 * (1 - progress)), width: 7 - progress * 4 });
+      .stroke({
+        color:
+          FUGITIVE_RAINBOW_COLORS[
+            Math.floor(fugitiveExplosionElapsed * 18) %
+              FUGITIVE_RAINBOW_COLORS.length
+          ],
+        alpha: Math.max(0, 0.9 * (1 - progress)),
+        width: 7 - progress * 4,
+      });
     for (let i = fugitiveExplosionParticles.length - 1; i >= 0; i -= 1) {
       const particle = fugitiveExplosionParticles[i];
       particle.life -= dt;
@@ -1391,7 +1569,9 @@ async function bootstrap() {
       particle.sprite.y += particle.vy * dt;
       particle.sprite.rotation += dt * 6;
       particle.sprite.alpha = Math.max(0, particle.life / particle.maxLife);
-      particle.sprite.scale.set(0.75 + (particle.life / particle.maxLife) * 0.8);
+      particle.sprite.scale.set(
+        0.75 + (particle.life / particle.maxLife) * 0.8,
+      );
       if (particle.life <= 0) {
         particle.sprite.destroy();
         fugitiveExplosionParticles.splice(i, 1);
@@ -1415,10 +1595,7 @@ async function bootstrap() {
         const eased = 1 - (1 - progress) ** 3;
         const arc = Math.sin(progress * Math.PI) * 54;
         egg.x = burst.start.x + (burst.target.x - burst.start.x) * eased;
-        egg.y =
-          burst.start.y +
-          (burst.target.y - burst.start.y) * eased -
-          arc;
+        egg.y = burst.start.y + (burst.target.y - burst.start.y) * eased - arc;
       } else {
         egg.x += burst.vx * dt;
         egg.y += burst.vy * dt;
@@ -1447,7 +1624,10 @@ async function bootstrap() {
 
   function spawnDebugFugitive() {
     fugitiveSystem.spawn({
-      x: Math.min(PLAYABLE_BOUNDS.right - 120, Math.max(PLAYABLE_BOUNDS.left + 120, player.x + 420)),
+      x: Math.min(
+        PLAYABLE_BOUNDS.right - 120,
+        Math.max(PLAYABLE_BOUNDS.left + 120, player.x + 420),
+      ),
       y: Math.max(PLAYABLE_BOUNDS.top + 120, player.y - 180),
     });
   }
@@ -1469,9 +1649,10 @@ async function bootstrap() {
   }
 
   function spawnDemonstrationFormation(center: Point, type: SpecialEggType) {
-    const formation = type === SpecialEggType.Magnet
-      ? LEVEL_DESIGN_CONFIG.formations.magnet
-      : LEVEL_DESIGN_CONFIG.formations.range;
+    const formation =
+      type === SpecialEggType.Magnet
+        ? LEVEL_DESIGN_CONFIG.formations.magnet
+        : LEVEL_DESIGN_CONFIG.formations.range;
     for (let i = 0; i < formation.count; i += 1) {
       const angle = (i / formation.count) * Math.PI * 2;
       const position = {
@@ -1483,7 +1664,8 @@ async function bootstrap() {
         position.x > PLAYABLE_BOUNDS.right - 80 ||
         position.y < PLAYABLE_BOUNDS.top + 80 ||
         position.y > PLAYABLE_BOUNDS.bottom - 80
-      ) continue;
+      )
+        continue;
       eggSystem.spawnEgg(position, progression.stageIndex, {
         type: "NORMAL",
         coinValue: 1,
@@ -1513,7 +1695,9 @@ async function bootstrap() {
 
   function findNormalPowerUpPosition(type: SpecialEggType) {
     const occupiedRegions = new Set(
-      [...normalPowerUpEntities.values()].map((entity) => getLogicalRegion(entity.container.position)),
+      [...normalPowerUpEntities.values()].map((entity) =>
+        getLogicalRegion(entity.container.position),
+      ),
     );
     const availableRegions = LEVEL_DESIGN_CONFIG.powerUpRegions.filter(
       (region) => !occupiedRegions.has(region),
@@ -1523,15 +1707,24 @@ async function bootstrap() {
       const bounds = getLogicalRegionBounds(region);
       for (let attempt = 0; attempt < 8; attempt += 1) {
         const position = {
-          x: bounds.left + 110 + Math.random() * Math.max(1, bounds.right - bounds.left - 220),
-          y: bounds.top + 110 + Math.random() * Math.max(1, bounds.bottom - bounds.top - 220),
+          x:
+            bounds.left +
+            110 +
+            Math.random() * Math.max(1, bounds.right - bounds.left - 220),
+          y:
+            bounds.top +
+            110 +
+            Math.random() * Math.max(1, bounds.bottom - bounds.top - 220),
         };
         if (
           isOffscreenSafeOpportunityPosition(position) &&
-          !specialEggSystem.entities.some((entity) =>
-            entity !== normalPowerUpEntities.get(type) && distance(entity.container.position, position) < 260,
+          !specialEggSystem.entities.some(
+            (entity) =>
+              entity !== normalPowerUpEntities.get(type) &&
+              distance(entity.container.position, position) < 260,
           )
-        ) return position;
+        )
+          return position;
       }
     }
     return null;
@@ -1554,7 +1747,8 @@ async function bootstrap() {
     for (const type of [...pendingNormalPowerUpRespawns]) {
       const position = findNormalPowerUpPosition(type);
       if (!position) continue;
-      if (spawnNormalPowerUp(type, position)) pendingNormalPowerUpRespawns.delete(type);
+      if (spawnNormalPowerUp(type, position))
+        pendingNormalPowerUpRespawns.delete(type);
     }
   }
 
@@ -1571,7 +1765,9 @@ async function bootstrap() {
       [SpecialEggType.Orbit, { x: origin.x + 450, y: origin.y }],
     ];
     for (const [type, position] of powerUpPositions) {
-      specialEggSystem.spawn(type, position, { opportunityId: "debug-showcase" });
+      specialEggSystem.spawn(type, position, {
+        opportunityId: "debug-showcase",
+      });
     }
     fugitiveSystem.spawn({ x: origin.x + 600, y: origin.y });
     eggSystem.spawnEgg(
@@ -1581,7 +1777,10 @@ async function bootstrap() {
     );
     goldMineSystem.debugPlace({ x: origin.x + 650, y: origin.y + 220 });
     if (PACING_DIRECTOR_CONFIG.debug) {
-      console.debug("[TEMP SHOWCASE] Power-ups, fugitive, coin and Gold Mine spawned", { origin });
+      console.debug(
+        "[TEMP SHOWCASE] Power-ups, fugitive, coin and Gold Mine spawned",
+        { origin },
+      );
     }
   }
 
@@ -1592,7 +1791,8 @@ async function bootstrap() {
   ) {
     if (
       (!contextual && powerUpManager.getActive(type)) ||
-      (!contextual && specialEggSystem.entities.some((entity) => entity.type === type))
+      (!contextual &&
+        specialEggSystem.entities.some((entity) => entity.type === type))
     )
       return false;
     const opportunityType =
@@ -1602,7 +1802,7 @@ async function bootstrap() {
           ? "ORBIT_EGG"
           : type === SpecialEggType.Magnet
             ? "MAGNET_EGG"
-          : "SPEED_EGG";
+            : "SPEED_EGG";
     const zones = getAvailableZones(
       opportunityType,
       time,
@@ -1612,55 +1812,72 @@ async function bootstrap() {
         x: (zone.bounds.left + zone.bounds.right) * 0.5,
         y: (zone.bounds.top + zone.bounds.bottom) * 0.5,
       };
-      return isAllowedLogicalRegion(center, LEVEL_DESIGN_CONFIG.powerUpRegions) &&
-        (zone.region === decision.targetRegion || decision.reason === "DEAD_MOMENT");
+      return (
+        isAllowedLogicalRegion(center, LEVEL_DESIGN_CONFIG.powerUpRegions) &&
+        (zone.region === decision.targetRegion ||
+          decision.reason === "DEAD_MOMENT")
+      );
     });
-    const toCandidate = (zone: (typeof OPPORTUNITY_SPAWN_ZONES)[number], offscreenOnly: boolean) => {
-        const center = {
-          x: (zone.bounds.left + zone.bounds.right) * 0.5,
-          y: (zone.bounds.top + zone.bounds.bottom) * 0.5,
-        };
-        const progress = 0.62;
-        const sideOffset =
-          zone.side === "LEFT" ? -115 : zone.side === "RIGHT" ? 115 : 0;
-        const position = {
-          x: Math.min(
-            zone.bounds.right - 70,
-            Math.max(
-              zone.bounds.left + 70,
-              player.x + (center.x - player.x) * progress + sideOffset,
-            ),
-          ),
-          y: Math.min(
-            zone.bounds.bottom - 70,
-            Math.max(
-              zone.bounds.top + 70,
-              player.y + (center.y - player.y) * progress,
-            ),
-          ),
-        };
-        return {
-          zone,
-          position,
-          valid: distance(position, player.position) >= (offscreenOnly ? 420 : 260) &&
-            distance(position, player.position) <= 1250 &&
-            (!offscreenOnly || isOffscreenSafeOpportunityPosition(position)) &&
-            specialEggSystem.entities.every((entity) =>
-              distance(entity.container.position, position) >= 260,
-            ),
-        };
+    const toCandidate = (
+      zone: (typeof OPPORTUNITY_SPAWN_ZONES)[number],
+      offscreenOnly: boolean,
+    ) => {
+      const center = {
+        x: (zone.bounds.left + zone.bounds.right) * 0.5,
+        y: (zone.bounds.top + zone.bounds.bottom) * 0.5,
       };
+      const progress = 0.62;
+      const sideOffset =
+        zone.side === "LEFT" ? -115 : zone.side === "RIGHT" ? 115 : 0;
+      const position = {
+        x: Math.min(
+          zone.bounds.right - 70,
+          Math.max(
+            zone.bounds.left + 70,
+            player.x + (center.x - player.x) * progress + sideOffset,
+          ),
+        ),
+        y: Math.min(
+          zone.bounds.bottom - 70,
+          Math.max(
+            zone.bounds.top + 70,
+            player.y + (center.y - player.y) * progress,
+          ),
+        ),
+      };
+      return {
+        zone,
+        position,
+        valid:
+          distance(position, player.position) >= (offscreenOnly ? 420 : 260) &&
+          distance(position, player.position) <= 1250 &&
+          (!offscreenOnly || isOffscreenSafeOpportunityPosition(position)) &&
+          specialEggSystem.entities.every(
+            (entity) => distance(entity.container.position, position) >= 260,
+          ),
+      };
+    };
     const primaryCandidates = zones.map((zone) => toCandidate(zone, true));
-    const fallbackZones = getAvailableZones(opportunityType, time, opportunityZoneRuntime)
-      .filter((zone) => !zones.includes(zone));
-    const fallbackCandidates = fallbackZones.map((zone) => toCandidate(zone, false));
-    const selected = [...primaryCandidates, ...fallbackCandidates].find((candidate) => candidate.valid);
+    const fallbackZones = getAvailableZones(
+      opportunityType,
+      time,
+      opportunityZoneRuntime,
+    ).filter((zone) => !zones.includes(zone));
+    const fallbackCandidates = fallbackZones.map((zone) =>
+      toCandidate(zone, false),
+    );
+    const selected = [...primaryCandidates, ...fallbackCandidates].find(
+      (candidate) => candidate.valid,
+    );
     if (PACING_DIRECTOR_CONFIG.debug) {
       console.debug("[Director] PowerUp Spawn Attempt", {
         candidate: type,
         eligible: true,
-        positionCandidates: primaryCandidates.length + fallbackCandidates.length,
-        rejected: [...primaryCandidates, ...fallbackCandidates].filter((candidate) => !candidate.valid).length,
+        positionCandidates:
+          primaryCandidates.length + fallbackCandidates.length,
+        rejected: [...primaryCandidates, ...fallbackCandidates].filter(
+          (candidate) => !candidate.valid,
+        ).length,
         fallbackUsed: selected ? !primaryCandidates.includes(selected) : false,
         result: selected ? "SUCCESS" : "FAIL",
       });
@@ -1695,30 +1912,51 @@ async function bootstrap() {
 
   function spawnDirectedFugitive(decision: PacingDecision) {
     if (fugitiveSystem.active || progression.stageIndex < 2) return false;
-    const zones = getAvailableZones("FUGITIVE_EGG", time, opportunityZoneRuntime)
-      .filter((zone) => {
-        const center = {
-          x: (zone.bounds.left + zone.bounds.right) * 0.5,
-          y: (zone.bounds.top + zone.bounds.bottom) * 0.5,
-        };
-        return isAllowedLogicalRegion(center, LEVEL_DESIGN_CONFIG.fugitiveRegions) &&
-          (zone.region === decision.targetRegion || decision.reason === "DEAD_MOMENT");
-      });
-    const candidates = zones.map((zone) => {
+    const zones = getAvailableZones(
+      "FUGITIVE_EGG",
+      time,
+      opportunityZoneRuntime,
+    ).filter((zone) => {
       const center = {
         x: (zone.bounds.left + zone.bounds.right) * 0.5,
         y: (zone.bounds.top + zone.bounds.bottom) * 0.5,
       };
-      const position = {
-        x: Math.min(zone.bounds.right - 100, Math.max(zone.bounds.left + 100, player.x + (center.x - player.x) * 0.72)),
-        y: Math.min(zone.bounds.bottom - 100, Math.max(zone.bounds.top + 100, player.y + (center.y - player.y) * 0.72)),
-      };
-      return { zone, position };
-    }).filter(({ position }) =>
-      distance(position, player.position) >= 620 &&
-      distance(position, player.position) <= 1250 &&
-      isOffscreenSafeOpportunityPosition(position),
-    );
+      return (
+        isAllowedLogicalRegion(center, LEVEL_DESIGN_CONFIG.fugitiveRegions) &&
+        (zone.region === decision.targetRegion ||
+          decision.reason === "DEAD_MOMENT")
+      );
+    });
+    const candidates = zones
+      .map((zone) => {
+        const center = {
+          x: (zone.bounds.left + zone.bounds.right) * 0.5,
+          y: (zone.bounds.top + zone.bounds.bottom) * 0.5,
+        };
+        const position = {
+          x: Math.min(
+            zone.bounds.right - 100,
+            Math.max(
+              zone.bounds.left + 100,
+              player.x + (center.x - player.x) * 0.72,
+            ),
+          ),
+          y: Math.min(
+            zone.bounds.bottom - 100,
+            Math.max(
+              zone.bounds.top + 100,
+              player.y + (center.y - player.y) * 0.72,
+            ),
+          ),
+        };
+        return { zone, position };
+      })
+      .filter(
+        ({ position }) =>
+          distance(position, player.position) >= 620 &&
+          distance(position, player.position) <= 1250 &&
+          isOffscreenSafeOpportunityPosition(position),
+      );
     const selected = candidates[0];
     if (!selected) return false;
     reserveZone(
@@ -1743,13 +1981,18 @@ async function bootstrap() {
     if (
       !contextualPowerUpPending ||
       carried < LEVEL_DESIGN_CONFIG.contextualPowerUp.minimumCarriedEggs ||
-      time - contextualPowerUpRequestedAt < LEVEL_DESIGN_CONFIG.contextualPowerUp.minimumDelay ||
-      specialEggSystem.entities.some((entity) => !normalPowerUpEntities.has(entity.type)) ||
+      time - contextualPowerUpRequestedAt <
+        LEVEL_DESIGN_CONFIG.contextualPowerUp.minimumDelay ||
+      specialEggSystem.entities.some(
+        (entity) => !normalPowerUpEntities.has(entity.type),
+      ) ||
       fugitiveSystem.active ||
       depositing ||
       evolving
-    ) return;
-    const type = Math.random() < 0.5 ? SpecialEggType.Speed : SpecialEggType.Orbit;
+    )
+      return;
+    const type =
+      Math.random() < 0.5 ? SpecialEggType.Speed : SpecialEggType.Orbit;
     const delivered = spawnDirectedSpecialEgg(
       {
         type: "SpecialEgg",
@@ -1792,23 +2035,31 @@ async function bootstrap() {
     getCarriedEggScale,
     getWorldInterest: (enemyPosition): GoldMineInterest | null => {
       const mineInterest = goldMineSystem.getInterestTarget();
-      const fugitiveTarget = fugitiveInterest &&
+      const fugitiveTarget =
+        fugitiveInterest &&
         time >= fugitiveInterest.availableAt &&
         time <= fugitiveInterest.expiresAt
-        ? {
-            position: fugitiveInterest.position,
-            strength: 1.1,
-            radius: LEVEL_DESIGN_CONFIG.enemyContest.maximumDistance,
-            type: "FUGITIVE_JACKPOT" as const,
-          }
-        : null;
+          ? {
+              position: fugitiveInterest.position,
+              strength: 1.1,
+              radius: LEVEL_DESIGN_CONFIG.enemyContest.maximumDistance,
+              type: "FUGITIVE_JACKPOT" as const,
+            }
+          : null;
       const interest = mineInterest ?? fugitiveTarget;
       if (!interest) return null;
       const nearest = enemies
         .filter((enemy) => enemy.container.visible && !enemy.depositing)
-        .sort((a, b) =>
-          Math.hypot(a.container.x - interest.position.x, a.container.y - interest.position.y) -
-          Math.hypot(b.container.x - interest.position.x, b.container.y - interest.position.y),
+        .sort(
+          (a, b) =>
+            Math.hypot(
+              a.container.x - interest.position.x,
+              a.container.y - interest.position.y,
+            ) -
+            Math.hypot(
+              b.container.x - interest.position.x,
+              b.container.y - interest.position.y,
+            ),
         )[0];
       if (!nearest) return null;
       const nearestDistance = Math.hypot(
@@ -1819,7 +2070,8 @@ async function bootstrap() {
         enemyPosition.x - interest.position.x,
         enemyPosition.y - interest.position.y,
       );
-      return requestedDistance <= interest.radius && nearestDistance <= interest.radius &&
+      return requestedDistance <= interest.radius &&
+        nearestDistance <= interest.radius &&
         Math.abs(requestedDistance - nearestDistance) < 1
         ? interest
         : null;
@@ -1940,6 +2192,10 @@ async function bootstrap() {
     };
     const nextIndex = Math.min(progression.stageIndex + 1, STAGES.length - 1);
     const nextStage = STAGES[nextIndex];
+    const isPortalPreview = nextIndex >= playerEvolutionFrames.length;
+    const previewTexture = isPortalPreview
+      ? worldAtlasTextures.portal
+      : playerEvolutionFrames[nextIndex];
     const threshold = nextStage.threshold;
     const previousThreshold = STAGES[Math.max(0, nextIndex - 1)].threshold;
     const progress =
@@ -1955,50 +2211,42 @@ async function bootstrap() {
           );
     basePreview.visible = nextIndex > progression.stageIndex && !evolving;
     const radius = 37 * nextStage.scale;
-    basePreviewEvolution.texture = playerEvolutionFrames[nextIndex];
-    basePreviewEvolutionColor.texture = playerEvolutionFrames[nextIndex];
+    basePreviewEvolution.texture = previewTexture;
+    basePreviewEvolutionColor.texture = previewTexture;
+    if (isPortalPreview) {
+      basePreviewEvolution.position.set(0, -142);
+    } else {
+      basePreviewEvolution.position.set(15, -150);
+    }
     basePreviewEvolutionColor.position.copyFrom(basePreviewEvolution.position);
-    basePreviewEvolution.width = 176 * nextStage.scale;
-    basePreviewEvolution.height = 226 * nextStage.scale;
+    basePreviewEvolution.width = (isPortalPreview ? 230 : 176) * nextStage.scale;
+    basePreviewEvolution.height = (isPortalPreview ? 203 : 226) * nextStage.scale;
     basePreviewEvolutionColor.width = basePreviewEvolution.width;
     basePreviewEvolutionColor.height = basePreviewEvolution.height;
-    basePreviewBody
-      .clear()
-      .circle(0, 0, radius)
-      .fill({ color: 0x05070b, alpha: 0.95 });
-    basePreviewEyes
-      .clear()
-      .ellipse(
-        -12 * nextStage.scale,
-        -5 * nextStage.scale,
-        5 * nextStage.scale,
-        8 * nextStage.scale,
-      )
-      .fill(0x05070b)
-      .ellipse(
-        12 * nextStage.scale,
-        -5 * nextStage.scale,
-        5 * nextStage.scale,
-        8 * nextStage.scale,
-      )
-      .fill(0x05070b);
+    basePreviewBody.clear();
+    if (!isPortalPreview) {
+      basePreviewBody.circle(0, 0, radius).fill({ color: 0x05070b, alpha: 0.95 });
+    }
+    basePreviewEyes.clear();
+    if (!isPortalPreview) {
+      basePreviewEyes
+        .ellipse(-12 * nextStage.scale, -5 * nextStage.scale, 5 * nextStage.scale, 8 * nextStage.scale)
+        .fill(0x05070b)
+        .ellipse(12 * nextStage.scale, -5 * nextStage.scale, 5 * nextStage.scale, 8 * nextStage.scale)
+        .fill(0x05070b);
+    }
     const previewWidth = basePreviewEvolutionColor.width;
     const previewHeight = basePreviewEvolutionColor.height;
     const previewX = basePreviewEvolutionColor.x - previewWidth / 2;
     // Os frames têm transparência acima do monstrinho; o preenchimento
     // considera apenas a área útil da arte, alinhada pelos pés.
-    const frameArtIndex = Math.min(
-      nextIndex,
-      evolutionArtTopFractions.length - 1,
-    );
-    const previewArtTop =
-      basePreviewEvolutionColor.y -
-      previewHeight / 2 +
-      previewHeight * evolutionArtTopFractions[frameArtIndex];
-    const previewArtBottom =
-      basePreviewEvolutionColor.y +
-      previewHeight / 2 -
-      previewHeight * evolutionArtBottomFractions[frameArtIndex];
+    const frameArtIndex = Math.min(nextIndex, evolutionArtTopFractions.length - 1);
+    const previewArtTop = isPortalPreview
+      ? basePreviewEvolutionColor.y - previewHeight / 2
+      : basePreviewEvolutionColor.y - previewHeight / 2 + previewHeight * evolutionArtTopFractions[frameArtIndex];
+    const previewArtBottom = isPortalPreview
+      ? basePreviewEvolutionColor.y + previewHeight / 2
+      : basePreviewEvolutionColor.y + previewHeight / 2 - previewHeight * evolutionArtBottomFractions[frameArtIndex];
     const previewArtHeight = previewArtBottom - previewArtTop;
     basePreviewFillMask
       .clear()
@@ -2243,11 +2491,21 @@ async function bootstrap() {
     actionButton.addChild(actionCurrencyGem, actionText);
     button.addChild(actionButton);
     button.on("pointertap", () => {
-      const cost = UPGRADE_CONFIG.initialCost + upgradeLevels[key] * UPGRADE_CONFIG.costStep;
+      const cost =
+        UPGRADE_CONFIG.initialCost +
+        upgradeLevels[key] * UPGRADE_CONFIG.costStep;
       if (currency < cost) return;
       currency -= cost;
       upgradeLevels[key] += 1;
       sessionTelemetry.record(time, "UPGRADE_PURCHASED", "MEDIUM", key);
+      if (
+        (upgradeTutorialStep === 1 && key === "speed") ||
+        (upgradeTutorialStep === 2 && key === "pickupRadius")
+      ) {
+        upgradeTutorialStep = upgradeTutorialStep === 1 ? 2 : 3;
+        upgradeTutorialElapsed = 0;
+        refreshUpgradeTutorialHand();
+      }
       if (!firstUpgradeCompleted) {
         firstUpgradeCompleted = true;
         upgradeFtueVisible = false;
@@ -2271,11 +2529,48 @@ async function bootstrap() {
       detail,
     };
   });
+  const upgradeTutorialHand = new Sprite(hudFrames.tutorialHand);
+  upgradeTutorialHand.anchor.set(0.5);
+  upgradeTutorialHand.width = 210;
+  upgradeTutorialHand.height = 255;
+  upgradeTutorialHand.eventMode = "none";
+  upgradeTutorialHand.visible = false;
+  upgradePanel.addChild(upgradeTutorialHand);
+  function refreshUpgradeTutorialHand() {
+    const target =
+      upgradeTutorialStep === 1
+        ? upgradeButtons.find((upgrade) => upgrade.key === "speed")
+        : upgradeTutorialStep === 2
+          ? upgradeButtons.find((upgrade) => upgrade.key === "pickupRadius")
+          : undefined;
+    upgradeTutorialHand.visible = upgradeMenuOpen && Boolean(target);
+    if (target) {
+      upgradeTutorialHand.position.set(target.button.x, target.button.y + 286);
+      upgradeTutorialHand.rotation = 0;
+    }
+  }
+  function updateUpgradeTutorialHand(dt: number) {
+    if (!upgradeTutorialHand.visible) return;
+    upgradeTutorialElapsed += dt;
+    const target =
+      upgradeTutorialStep === 1
+        ? upgradeButtons.find((upgrade) => upgrade.key === "speed")
+        : upgradeButtons.find((upgrade) => upgrade.key === "pickupRadius");
+    if (!target) return;
+    const tap =
+      (Math.sin((upgradeTutorialElapsed / 0.9) * Math.PI * 2) + 1) * 0.5;
+    upgradeTutorialHand.position.set(
+      target.button.x,
+      target.button.y + 286 + tap * 12,
+    );
+  }
   upgradeHint.position.set(-134, 82);
   upgradeText.visible = false;
   function refreshUpgradeButtons() {
     for (const upgrade of upgradeButtons) {
-      const cost = UPGRADE_CONFIG.initialCost + upgradeLevels[upgrade.key] * UPGRADE_CONFIG.costStep;
+      const cost =
+        UPGRADE_CONFIG.initialCost +
+        upgradeLevels[upgrade.key] * UPGRADE_CONFIG.costStep;
       const available = currency >= cost;
       upgrade.button.clear();
       upgrade.button.alpha = 1;
@@ -2306,6 +2601,7 @@ async function bootstrap() {
     upgradeFtueVisible = false;
     upgradeStation.rotation = 0;
     upgradeStation.scale.set(1);
+    upgradeTutorialHand.visible = false;
     // ADS TEMPORARIAMENTE DESATIVADOS.
     // Quando for necessário reativar, descomente este bloco para pausar o
     // gameplay durante todo o anúncio e retomá-lo ao final:
@@ -2340,10 +2636,14 @@ async function bootstrap() {
         upgradeLoadStatus.visible = false;
         if (upgradeUnlockRequested) unlockUpgradeStationTutorial();
         if (DEBUG_OPEN_UPGRADE_MENU) {
+          // Debug mode bypasses the station unlock flow. Start the visual
+          // upgrade tutorial explicitly so the hand is available for testing.
+          upgradeTutorialStep = 1;
           upgradeMenuOpen = true;
           upgradePanel.visible = true;
           upgradeCurrencyHud.visible = true;
           upgradeOverlay.visible = true;
+          refreshUpgradeTutorialHand();
           ui.setChildIndex(upgradeOverlay, ui.children.length - 1);
           ui.setChildIndex(upgradePanel, ui.children.length - 1);
           ui.setChildIndex(upgradeCurrencyHud, ui.children.length - 1);
@@ -2671,7 +2971,9 @@ async function bootstrap() {
           ) ||
           Boolean(
             fugitiveSystem.getSnapshot() &&
-              isVisibleOpportunityPosition(fugitiveSystem.getSnapshot()!.position),
+            isVisibleOpportunityPosition(
+              fugitiveSystem.getSnapshot()!.position,
+            ),
           ) ||
           ["ACTIVE", "EXTRACTING", "FINAL_JACKPOT"].includes(
             goldMineSystem.getSnapshot().state,
@@ -2718,13 +3020,20 @@ async function bootstrap() {
       for (const verticalOffset of [720, 980, 1240, 1500]) {
         for (const lateralOffset of [-300, 0, 300]) {
           const candidate = {
-            x: Math.max(bounds.left + 120, Math.min(bounds.right - 120, player.x + lateralOffset)),
-            y: Math.max(bounds.top + 120, Math.min(bounds.bottom - 120, player.y - verticalOffset)),
+            x: Math.max(
+              bounds.left + 120,
+              Math.min(bounds.right - 120, player.x + lateralOffset),
+            ),
+            y: Math.max(
+              bounds.top + 120,
+              Math.min(bounds.bottom - 120, player.y - verticalOffset),
+            ),
           };
           if (
             distance(candidate, player.position) >= 520 &&
             isOffscreenSafeOpportunityPosition(candidate)
-          ) candidates.push(candidate);
+          )
+            candidates.push(candidate);
         }
       }
       if (candidates.length > 0) {
@@ -2732,32 +3041,38 @@ async function bootstrap() {
           x: player.x - previousPlayerPosition.x,
           y: player.y - previousPlayerPosition.y,
         };
-        return candidates.sort((a, b) => {
-          const score = (candidate: Point) =>
-            (candidate.x - player.x) * movement.x + (candidate.y - player.y) * movement.y;
-          return score(b) - score(a);
-        })[0] ?? null;
+        return (
+          candidates.sort((a, b) => {
+            const score = (candidate: Point) =>
+              (candidate.x - player.x) * movement.x +
+              (candidate.y - player.y) * movement.y;
+            return score(b) - score(a);
+          })[0] ?? null
+        );
       }
       return null;
     }
     const topCandidates = GOLD_MINE_CONFIG.spawnLocations.filter((candidate) =>
       isAllowedLogicalRegion(candidate, LEVEL_DESIGN_CONFIG.goldMineRegions),
     );
-    const strictCandidates = topCandidates.filter((candidate) =>
-      Math.hypot(candidate.x - player.x, candidate.y - player.y) >=
-        GOLD_MINE_CONFIG.respawnMinDistance &&
-      Math.hypot(candidate.x - previous.x, candidate.y - previous.y) >= 300 &&
-      isOffscreenSafeOpportunityPosition(candidate),
+    const strictCandidates = topCandidates.filter(
+      (candidate) =>
+        Math.hypot(candidate.x - player.x, candidate.y - player.y) >=
+          GOLD_MINE_CONFIG.respawnMinDistance &&
+        Math.hypot(candidate.x - previous.x, candidate.y - previous.y) >= 300 &&
+        isOffscreenSafeOpportunityPosition(candidate),
     );
-    const relaxedCandidates = topCandidates.filter((candidate) =>
-      Math.hypot(candidate.x - player.x, candidate.y - player.y) >= 520 &&
-      Math.hypot(candidate.x - previous.x, candidate.y - previous.y) >= 120,
+    const relaxedCandidates = topCandidates.filter(
+      (candidate) =>
+        Math.hypot(candidate.x - player.x, candidate.y - player.y) >= 520 &&
+        Math.hypot(candidate.x - previous.x, candidate.y - previous.y) >= 120,
     );
-    const candidates = strictCandidates.length > 0
-      ? strictCandidates
-      : relaxedCandidates.length > 0
-        ? relaxedCandidates
-        : topCandidates;
+    const candidates =
+      strictCandidates.length > 0
+        ? strictCandidates
+        : relaxedCandidates.length > 0
+          ? relaxedCandidates
+          : topCandidates;
     if (PACING_DIRECTOR_CONFIG.debug) {
       console.debug("[GoldMine] Respawn position audit", {
         strictCandidates: strictCandidates.length,
@@ -2771,14 +3086,21 @@ async function bootstrap() {
       y: player.y - previousPlayerPosition.y,
     };
     const movementLength = Math.hypot(movement.x, movement.y) || 1;
-    const forward = { x: movement.x / movementLength, y: movement.y / movementLength };
+    const forward = {
+      x: movement.x / movementLength,
+      y: movement.y / movementLength,
+    };
     const ranked = [...candidates].sort((a, b) => {
       const score = (candidate: Point) => {
         const dx = candidate.x - player.x;
         const dy = candidate.y - player.y;
         const length = Math.hypot(dx, dy) || 1;
         const ahead = (dx * forward.x + dy * forward.y) / length;
-        const topBias = Math.max(0, (PLAYABLE_BOUNDS.bottom - candidate.y) / (PLAYABLE_BOUNDS.bottom - PLAYABLE_BOUNDS.top));
+        const topBias = Math.max(
+          0,
+          (PLAYABLE_BOUNDS.bottom - candidate.y) /
+            (PLAYABLE_BOUNDS.bottom - PLAYABLE_BOUNDS.top),
+        );
         return ahead * (goldMineIntroduced ? 0.35 : 1.2) + topBias * 0.2;
       };
       return score(b) - score(a);
@@ -2845,20 +3167,34 @@ async function bootstrap() {
     progressBadge.position.set(62, 160);
     rankingPanel.position.set(window.innerWidth - 88, 75);
     upgradePanel.position.set(window.innerWidth / 2, window.innerHeight / 2);
-    const desktopScale =
-      window.innerWidth >= 1200 ? 0.78 : window.innerWidth >= 900 ? 0.88 : 1;
-    upgradePanel.scale.set(
-      Math.min(
-        desktopScale,
-        (window.innerWidth - 80) / 820,
-        (window.innerHeight - 80) / 720,
-      ),
+    const upgradeSafeMargin = Math.max(
+      24,
+      Math.min(56, window.innerWidth * 0.035),
     );
+    const upgradeLogicalWidth = 900;
+    const upgradeLogicalHeight = 820;
+    // Keep the compact mobile composition unchanged; desktop uses half of the
+    // previous maximum scale so the gameplay remains visible around the panel.
+    const upgradeMaxScale = window.innerWidth >= 900 ? 0.45 : 0.9;
+    const upgradeScale = Math.min(
+      upgradeMaxScale,
+      (window.innerWidth - upgradeSafeMargin * 2) / upgradeLogicalWidth,
+      (window.innerHeight - upgradeSafeMargin * 2) / upgradeLogicalHeight,
+    );
+    upgradePanel.scale.set(Math.max(0.1, upgradeScale));
+    // Tune these two values to adjust the upgrade currency counter on desktop.
+    // Mobile keeps its current size and vertical position.
+    const upgradeCurrencyDesktop = window.innerWidth >= 900;
+    const upgradeCurrencyScaleMultiplier = upgradeCurrencyDesktop ? 2.1 : 1.5;
+    const upgradeCurrencyVerticalOffset = upgradeCurrencyDesktop ? -210 : -300;
     upgradeCurrencyHud.position.set(
       window.innerWidth / 2,
-      window.innerHeight / 2 - 250 * desktopScale,
+      window.innerHeight / 2 + upgradeCurrencyVerticalOffset * upgradeScale,
     );
-    upgradeCurrencyHud.scale.set(desktopScale / 2.2);
+    upgradeCurrencyHud.scale.set(
+      (upgradeScale / 2.2) * upgradeCurrencyScaleMultiplier,
+    );
+    refreshUpgradeTutorialHand();
     upgradeOverlay
       .clear()
       .rect(0, 0, window.innerWidth, window.innerHeight)
@@ -2905,6 +3241,11 @@ async function bootstrap() {
   });
   const pressedKeys = new Set<string>();
   const updateKeyboardInput = () => {
+    if (evolving) {
+      input.x = 0;
+      input.y = 0;
+      return;
+    }
     if (joystickActive) return;
     const left = pressedKeys.has("ArrowLeft") || pressedKeys.has("KeyA");
     const right = pressedKeys.has("ArrowRight") || pressedKeys.has("KeyD");
@@ -2945,7 +3286,6 @@ async function bootstrap() {
     "KeyK",
     "KeyL",
     "KeyC",
-    "KeyT",
   ]);
   window.addEventListener("keydown", (event) => {
     if (!keyboardCodes.has(event.code)) return;
@@ -2968,10 +3308,6 @@ async function bootstrap() {
     }
     if (event.code === "Digit5") {
       spawnDebugFugitive();
-      return;
-    }
-    if (event.code === "KeyT") {
-      spawnDebugFeatureShowcase();
       return;
     }
     if (PACING_DIRECTOR_CONFIG.debug) {
@@ -3025,9 +3361,23 @@ async function bootstrap() {
     cameraShakeTime = Math.max(cameraShakeTime, duration);
   }
 
-  type Particle = { sprite: Graphics; vx: number; vy: number; life: number };
+  type EvolutionParticle = {
+    sprite: Graphics;
+    angle: number;
+    radius: number;
+    speed: number;
+    life: number;
+    maxLife: number;
+    targetY: number;
+    color: number;
+  };
   const evolutionOverlay = new Graphics();
   evolutionOverlay.visible = false;
+  evolutionOverlay.eventMode = "none";
+  evolutionOverlay.on("pointerdown", (event) => {
+    event.stopPropagation();
+    if (evolving && evolutionElapsed >= 1.45) evolutionSkipRequested = true;
+  });
   const resizeEvolutionOverlay = () => {
     evolutionOverlay
       .clear()
@@ -3041,19 +3391,70 @@ async function bootstrap() {
   evolutionFx.visible = false;
   app.stage.addChild(evolutionFx);
   const evolutionParticlesLayer = new Container();
-  const evolutionSprite = new Sprite(playerEvolutionFrames[0]);
-  evolutionSprite.anchor.set(0.5);
-  const evolutionTitle = label("EVOLUTION!", 42, 0xfff2a6);
-  evolutionTitle.anchor.set(0.5);
+  const evolutionVfxLayoutContainer = new Container();
+  const evolutionVfxAnimationContainer = new Container();
+  evolutionVfxLayoutContainer.addChild(evolutionVfxAnimationContainer);
+  const evolutionVfx = new Sprite(evolutionUiFrames.vfx);
+  evolutionVfx.anchor.set(0.5);
+  evolutionVfxAnimationContainer.addChild(evolutionVfx);
+  const monsterLayoutContainer = new Container();
+  const monsterAnimationContainer = new Container();
+  monsterLayoutContainer.addChild(monsterAnimationContainer);
+  evolutionVfx.position.set(0, 18);
+  const evolutionEnergyRing = new Graphics();
+  const previousEvolutionSprite = new Sprite(playerEvolutionFrames[0]);
+  previousEvolutionSprite.anchor.set(0.5);
+  const nextEvolutionSprite = new Sprite(playerEvolutionFrames[0]);
+  nextEvolutionSprite.anchor.set(0.5);
+  nextEvolutionSprite.visible = false;
+  const evolutionFlash = new Graphics();
+  evolutionFlash.circle(0, 0, 180).fill(0xffffff);
+  evolutionFlash.alpha = 0;
+  monsterAnimationContainer.addChild(previousEvolutionSprite, nextEvolutionSprite);
+  const ribbonLayoutContainer = new Container();
+  const ribbonAnimationContainer = new Container();
+  ribbonLayoutContainer.addChild(ribbonAnimationContainer);
+  const evolutionBanner = new Sprite(evolutionUiFrames.banner);
+  evolutionBanner.anchor.set(0.5);
+  evolutionBanner.visible = false;
+  ribbonAnimationContainer.addChild(evolutionBanner);
+  const levelLayoutContainer = new Container();
+  const levelAnimationContainer = new Container();
+  levelLayoutContainer.addChild(levelAnimationContainer);
+  const evolutionLevelPlate = new Sprite(evolutionUiFrames.levelPlate);
+  evolutionLevelPlate.anchor.set(0.5);
+  evolutionLevelPlate.visible = false;
+  levelAnimationContainer.addChild(evolutionLevelPlate);
+  const evolutionLevel = label("Level 1", 42, 0x5a250f);
+  evolutionLevel.anchor.set(0.5);
+  evolutionLevel.style.fontWeight = "900";
+  levelAnimationContainer.addChild(evolutionLevel);
+  const resizeEvolutionComposition = () => {
+    evolutionLayout = getEvolutionLayout();
+    evolutionFlash.clear().circle(0, 0, 180).fill(0xffffff);
+    if (evolving) layoutEvolutionPresentation();
+  };
+  window.addEventListener("resize", resizeEvolutionComposition);
+  evolutionLevel.visible = false;
   evolutionFx.addChild(
+    evolutionVfxLayoutContainer,
+    evolutionEnergyRing,
     evolutionParticlesLayer,
-    evolutionSprite,
-    evolutionTitle,
+    monsterLayoutContainer,
+    evolutionFlash,
+    ribbonLayoutContainer,
+    levelLayoutContainer,
   );
-  const evolutionParticles: Particle[] = [];
+  const evolutionParticles: EvolutionParticle[] = [];
   let evolutionElapsed = 0;
   let evolutionTarget = 0;
   let evolutionStart: Point = { x: 0, y: 0 };
+  let evolutionHitStopRemaining = 0;
+  let evolutionImpactTriggered = false;
+  let evolutionRevealTriggered = false;
+  let evolutionRibbonTriggered = false;
+  let evolutionLevelTriggered = false;
+  let evolutionSkipRequested = false;
   type CurrencyBurst = { sprite: Graphics; elapsed: number; start: Point };
   const currencyBursts: CurrencyBurst[] = [];
   type PickupAnimation = {
@@ -3337,6 +3738,251 @@ async function bootstrap() {
     }
   }
 
+  const easeOutCubic = (value: number) => 1 - (1 - value) ** 3;
+  const easeInCubic = (value: number) => value ** 3;
+  const easeInOutSine = (value: number) =>
+    -(Math.cos(Math.PI * value) - 1) / 2;
+  const easeOutBack = (value: number) => {
+    const overshoot = 1.70158;
+    const adjusted = value - 1;
+    return 1 + (overshoot + 1) * adjusted ** 3 + overshoot * adjusted ** 2;
+  };
+  const remap = (value: number, start: number, end: number) =>
+    Math.max(0, Math.min(1, (value - start) / (end - start)));
+  type EvolutionLayout = {
+    safeWidth: number;
+    safeHeight: number;
+    ribbonWidth: number;
+    ribbonHeight: number;
+    monsterMaxWidth: number;
+    monsterMaxHeight: number;
+    levelWidth: number;
+    levelHeight: number;
+    ribbonY: number;
+    monsterY: number;
+    vfxWidth: number;
+    vfxHeight: number;
+    levelY: number;
+    gap: number;
+  };
+  let evolutionLayout: EvolutionLayout | null = null;
+  const getEvolutionLayout = (): EvolutionLayout => {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const aspect = width / Math.max(1, height);
+    const portrait = aspect < 0.8;
+    const landscape = aspect > 1.3;
+    const safeWidth = portrait
+      ? Math.min(width * 0.86, 520)
+      : Math.min(width * (landscape ? 0.52 : 0.6), 760);
+    const safeHeight = portrait
+      ? Math.min(height * 0.62, 610)
+      : Math.min(height * 0.74, 680);
+    const ribbonWidth = portrait
+      ? Math.min(width * 0.72, safeWidth)
+      : Math.min(safeWidth * 0.9, 620);
+    const ribbonHeight = ribbonWidth * (286 / 630);
+    const baseMonsterMaxHeight = portrait
+      ? Math.min(height * 0.27, safeHeight * 0.48)
+      : Math.min(height * 0.32, safeHeight * 0.52);
+    const monsterMaxHeight = portrait
+      ? Math.min(height * 0.27, safeHeight * 0.48)
+      : Math.min(baseMonsterMaxHeight, safeHeight * 0.52);
+    const monsterMaxWidth = portrait
+      ? Math.min(width * 0.48, safeWidth * 0.62)
+      : Math.min(safeWidth * 0.62, baseMonsterMaxHeight * 1.2);
+    const levelWidth = portrait
+      ? Math.min(width * 0.48, safeWidth)
+      : Math.min(safeWidth * 0.42, 200);
+    const levelHeight = levelWidth * (108 / 365);
+    const centerY = height / 2;
+    // Keep the monster near the visual center; the Level plate remains in the
+    // lower quarter of the viewport, so the character must sit slightly above
+    // the mathematical center to preserve a readable vertical hierarchy.
+    const monsterY = height * 0.48 - centerY;
+    const topSafe = height * (portrait ? 0.2 : 0.2);
+    const gap = Math.max(16, Math.min(28, height * 0.025));
+    const ribbonY = Math.min(
+      topSafe + ribbonHeight / 2 - centerY,
+      monsterY - monsterMaxHeight / 2 - gap - ribbonHeight / 2,
+    );
+    const desiredLevelY = height * 0.75 - centerY;
+    const vfxWidth = Math.min(safeWidth * 1.28, portrait ? 470 : 600);
+    return {
+      safeWidth,
+      safeHeight,
+      ribbonWidth,
+      ribbonHeight,
+      monsterMaxWidth,
+      monsterMaxHeight,
+      levelWidth,
+      levelHeight,
+      ribbonY,
+      monsterY,
+      vfxWidth,
+      vfxHeight: Math.min(safeHeight * 0.86, vfxWidth * (602 / 717)),
+      levelY: desiredLevelY,
+      gap,
+    };
+  };
+
+  function fitSpriteToBox(sprite: Sprite, maxWidth: number, maxHeight: number) {
+    const textureWidth = Math.max(1, sprite.texture.width);
+    const textureHeight = Math.max(1, sprite.texture.height);
+    const fitScale = Math.min(maxWidth / textureWidth, maxHeight / textureHeight);
+    sprite.scale.set(1);
+    sprite.width = textureWidth;
+    sprite.height = textureHeight;
+    return fitScale;
+  }
+
+  // Audio hooks stay self-contained so real assets can replace these tones
+  // later without coupling the evolution timeline to a loader.
+  function playEvolutionTone(startFrequency: number, endFrequency: number, duration: number, volume: number) {
+    try {
+      pickupAudioContext ??= new AudioContext();
+      if (pickupAudioContext.state === "suspended") void pickupAudioContext.resume();
+      const now = pickupAudioContext.currentTime;
+      const oscillator = pickupAudioContext.createOscillator();
+      const gain = pickupAudioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(startFrequency, now);
+      oscillator.frequency.exponentialRampToValueAtTime(endFrequency, now + duration);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(volume, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      oscillator.connect(gain).connect(pickupAudioContext.destination);
+      oscillator.start(now);
+      oscillator.stop(now + duration + 0.01);
+    } catch {
+      // Audio is optional; browser policy must never block an evolution.
+    }
+  }
+  const evolutionChargeSfx = () => playEvolutionTone(260, 620, 0.42, 0.035);
+  const evolutionFlashSfx = () => playEvolutionTone(150, 72, 0.12, 0.07);
+  const evolutionRevealSfx = () => playEvolutionTone(620, 980, 0.18, 0.055);
+  const evolutionLevelSfx = () => playEvolutionTone(760, 1120, 0.12, 0.035);
+
+  function configureEvolutionSprite(
+    sprite: Sprite,
+    index: number,
+  ) {
+    const isPortal = index >= playerEvolutionFrames.length;
+    sprite.texture = isPortal
+      ? worldAtlasTextures.portal
+      : playerEvolutionFrames[index];
+    sprite.scale.set(1);
+    sprite.position.set(0, evolutionLayout?.monsterY ?? 0);
+  }
+
+  function evolutionDebugLayout(
+    layout: EvolutionLayout,
+    ribbonScale: number,
+    monsterScale: number,
+    levelScale: number,
+  ) {
+    const ribbonWidth = evolutionBanner.texture.width * ribbonScale * 1.08;
+    const monsterWidth = nextEvolutionSprite.texture.width * monsterScale * 1.12;
+    const monsterHeight = nextEvolutionSprite.texture.height * monsterScale * 1.12;
+    const levelWidth = evolutionLevelPlate.texture.width * levelScale;
+    console.assert(ribbonWidth <= layout.ribbonWidth + 0.5, "Evolution ribbon exceeded safe width");
+    console.assert(monsterWidth <= layout.monsterMaxWidth + 0.5, "Evolution monster exceeded safe width");
+    console.assert(monsterHeight <= layout.monsterMaxHeight + 0.5, "Evolution monster exceeded safe height");
+    console.assert(levelWidth <= layout.levelWidth + 0.5, "Evolution level plate exceeded safe width");
+  }
+
+  function layoutEvolutionPresentation() {
+    if (!evolutionLayout) evolutionLayout = getEvolutionLayout();
+    const layout = evolutionLayout;
+    evolutionFx.scale.set(1);
+    evolutionFx.position.set(window.innerWidth / 2, window.innerHeight / 2);
+    evolutionParticlesLayer.position.set(0, 0);
+    evolutionEnergyRing.position.set(0, 0);
+    evolutionVfx.width = layout.vfxWidth;
+    evolutionVfx.height = layout.vfxHeight;
+    evolutionVfxLayoutContainer.position.set(0, layout.monsterY);
+    evolutionVfxAnimationContainer.scale.set(1);
+    evolutionVfx.position.set(0, 0);
+    evolutionFlash.position.set(0, layout.monsterY);
+    ribbonLayoutContainer.position.set(0, layout.ribbonY);
+    ribbonAnimationContainer.scale.set(1);
+    evolutionBanner.scale.set(1);
+    evolutionBanner.width = evolutionBanner.texture.width;
+    evolutionBanner.height = evolutionBanner.texture.height;
+    const ribbonBaseScale = fitSpriteToBox(
+      evolutionBanner,
+      layout.ribbonWidth / 1.08,
+      layout.ribbonHeight / 1.08,
+    );
+    ribbonLayoutContainer.scale.set(ribbonBaseScale);
+    evolutionBanner.position.set(0, 0);
+    levelLayoutContainer.scale.set(1);
+    levelAnimationContainer.scale.set(1);
+    evolutionLevelPlate.scale.set(1);
+    evolutionLevelPlate.width = evolutionLevelPlate.texture.width;
+    evolutionLevelPlate.height = evolutionLevelPlate.texture.height;
+    const levelBaseScale = fitSpriteToBox(
+      evolutionLevelPlate,
+      layout.levelWidth,
+      layout.levelHeight,
+    );
+    levelLayoutContainer.scale.set(levelBaseScale);
+    evolutionLevelPlate.position.set(0, 0);
+    evolutionLevel.position.set(0, -3);
+    monsterLayoutContainer.position.set(0, layout.monsterY);
+    monsterAnimationContainer.position.set(0, 0);
+    monsterAnimationContainer.scale.set(1);
+    const monsterBaseScale = Math.min(
+      fitSpriteToBox(
+        previousEvolutionSprite,
+        layout.monsterMaxWidth / 1.12,
+        layout.monsterMaxHeight / 1.12,
+      ),
+      fitSpriteToBox(
+        nextEvolutionSprite,
+        layout.monsterMaxWidth / 1.12,
+        layout.monsterMaxHeight / 1.12,
+      ),
+    );
+    monsterLayoutContainer.scale.set(monsterBaseScale);
+    previousEvolutionSprite.position.set(0, 0);
+    nextEvolutionSprite.position.set(0, 0);
+    const monsterBounds = nextEvolutionSprite.getBounds();
+    const desiredLevelGlobalY = window.innerHeight * 0.75;
+    const levelGlobalY = Math.max(
+      monsterBounds.bottom + layout.gap,
+      desiredLevelGlobalY,
+    );
+    const levelLocal = evolutionFx.toLocal({
+      x: window.innerWidth / 2,
+      y: levelGlobalY,
+    });
+    layout.levelY = levelLocal.y;
+    levelLayoutContainer.position.set(0, layout.levelY);
+    evolutionDebugLayout(layout, ribbonBaseScale, monsterBaseScale, levelBaseScale);
+  }
+
+  function spawnEvolutionChargeParticles(particleCount = 20) {
+    for (let i = 0; i < particleCount; i += 1) {
+      const angle = (i / particleCount) * Math.PI * 2;
+      const color = i % 3 === 0 ? 0xfff2a6 : i % 3 === 1 ? 0xc879ff : 0xffffff;
+      const particle = new Graphics()
+        .star(0, 0, i % 4 === 0 ? 4 : 3, 5, i % 4 === 0 ? 2.4 : 1.7)
+        .fill(color);
+      evolutionParticlesLayer.addChild(particle);
+      evolutionParticles.push({
+        sprite: particle,
+        angle,
+        radius: 120 + (i % 5) * 25,
+        speed: 0.65 + (i % 4) * 0.1,
+        life: 1,
+        maxLife: 1,
+        targetY: -30 + (i % 3) * 20,
+        color,
+      });
+    }
+  }
+
   function startEvolutionFeedback(nextIndex: number) {
     evolving = true;
     input.x = 0;
@@ -3345,32 +3991,52 @@ async function bootstrap() {
     joystick.visible = false;
     evolutionTarget = nextIndex;
     evolutionElapsed = 0;
+    evolutionHitStopRemaining = 0;
+    evolutionImpactTriggered = false;
+    evolutionRevealTriggered = false;
+    evolutionRibbonTriggered = false;
+    evolutionLevelTriggered = false;
+    evolutionSkipRequested = false;
+    evolutionLayout = getEvolutionLayout();
     basePreview.visible = false;
     basePreview.scale.set(1);
     nestPreviewJuiceActive = false;
-    const stage = STAGES[nextIndex];
-    evolutionSprite.texture = playerEvolutionFrames[nextIndex];
-    evolutionSprite.width = 176 * stage.scale;
-    evolutionSprite.height = 226 * stage.scale;
-    evolutionSprite.position.set(0, -30 * stage.scale);
-    evolutionTitle.position.set(0, -178 * stage.scale);
+    const previousIndex = Math.max(0, nextIndex - 1);
+    configureEvolutionSprite(previousEvolutionSprite, previousIndex);
+    configureEvolutionSprite(nextEvolutionSprite, nextIndex);
+    previousEvolutionSprite.visible = true;
+    nextEvolutionSprite.visible = false;
+    previousEvolutionSprite.alpha = 1;
+    nextEvolutionSprite.alpha = 1;
+    monsterAnimationContainer.scale.set(1);
+    evolutionVfx.alpha = 0;
+    evolutionVfxAnimationContainer.scale.set(0.8);
+    evolutionEnergyRing.alpha = 0;
+    evolutionFlash.alpha = 0;
+    evolutionBanner.visible = false;
+    evolutionBanner.alpha = 0;
+    ribbonAnimationContainer.scale.set(0.5);
+    evolutionLevelPlate.visible = false;
+    evolutionLevel.alpha = 0;
+    evolutionLevelPlate.alpha = 0;
+    levelAnimationContainer.scale.set(0);
+    evolutionLevel.text = `Level ${evolutionTarget + 1}`;
     const center = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     evolutionStart = center;
     evolutionFx.position.copyFrom(center);
+    evolutionFx.scale.set(1);
+    layoutEvolutionPresentation();
+    monsterAnimationContainer.scale.set(0.65);
+    layoutEvolutionPresentation();
+    ui.alpha = 1;
+    evolutionOverlay.alpha = 0;
+    evolutionOverlay.eventMode = "static";
+    evolutionOverlay.cursor = "pointer";
     evolutionOverlay.visible = true;
     evolutionFx.visible = true;
-    const particleSpread = 5;
-    for (let i = 0; i < 22; i += 1) {
-      const angle = (i / 22) * Math.PI * 2;
-      const particle = new Graphics().circle(0, 0, 3 + (i % 3)).fill(0xeee7ff);
-      evolutionParticlesLayer.addChild(particle);
-      evolutionParticles.push({
-        sprite: particle,
-        vx: Math.cos(angle) * (45 + i * 2) * particleSpread,
-        vy: Math.sin(angle) * (45 + i * 2) * particleSpread,
-        life: 1,
-      });
-    }
+    evolutionParticles.length = 0;
+    spawnEvolutionChargeParticles();
+    evolutionChargeSfx();
   }
 
   function unlockUpgradeStationTutorial() {
@@ -3381,6 +4047,9 @@ async function bootstrap() {
       return;
     }
     upgradeStationUnlocked = true;
+    if (upgradeTutorialStep === 0) {
+      upgradeTutorialStep = 1;
+    }
     upgradeFtueVisible = true;
     upgradeSpawnElapsed = 0;
     upgradeStation.visible = true;
@@ -3393,69 +4062,142 @@ async function bootstrap() {
 
   function updateEvolutionFeedback(dt: number) {
     if (!evolving) return;
+    if (evolutionHitStopRemaining > 0) {
+      evolutionHitStopRemaining = Math.max(0, evolutionHitStopRemaining - dt);
+      return;
+    }
     evolutionElapsed += dt;
-    const center = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
-    const playerScreen = player.toGlobal({ x: 0, y: 0 });
-    const travel =
-      evolutionElapsed < 0.55
-        ? evolutionElapsed / 0.55
-        : Math.min(1, (evolutionElapsed - 0.55) / 0.8);
-    const eased = 1 - (1 - travel) ** 3;
-    if (evolutionElapsed < 0.55)
-      evolutionFx.position.set(
-        evolutionStart.x + (center.x - evolutionStart.x) * eased,
-        evolutionStart.y + (center.y - evolutionStart.y) * eased,
-      );
-    else
-      evolutionFx.position.set(
-        center.x + (playerScreen.x - center.x) * eased,
-        center.y + (playerScreen.y - center.y) * eased,
-      );
-    evolutionFx.scale.set(
-      evolutionElapsed < 0.55
-        ? 1 + Math.sin(evolutionElapsed * 18) * 0.08
-        : 1.2 - eased * 0.2,
-    );
+    const dimProgress = easeInOutSine(remap(evolutionElapsed, 0, 0.25));
+    evolutionOverlay.alpha = 0.5 * dimProgress;
+    ui.alpha = 1 - 0.7 * easeInOutSine(remap(evolutionElapsed, 0, 0.2));
+    const focusProgress = easeOutCubic(remap(evolutionElapsed, 0.2, 0.7));
+    const chargeProgress = easeInCubic(remap(evolutionElapsed, 0.6, 1.2));
+    const oldScale =
+      evolutionElapsed < 1.2
+        ? 1 + 0.08 * focusProgress + Math.sin(evolutionElapsed * 22) * 0.012 * chargeProgress
+        : 1.08 - 0.33 * easeInCubic(remap(evolutionElapsed, 1.2, 1.3));
+    monsterAnimationContainer.scale.set(oldScale);
+    monsterAnimationContainer.y = -8 * focusProgress + Math.sin(evolutionElapsed * 24) * 2 * chargeProgress;
+    evolutionVfx.alpha = 0.08 + 0.92 * chargeProgress;
+    evolutionVfxAnimationContainer.scale.set(0.8 + 0.38 * chargeProgress);
+    evolutionVfx.rotation = evolutionElapsed * 0.12;
+    evolutionEnergyRing
+      .clear()
+      .ellipse(0, (evolutionLayout?.monsterY ?? 0) + 92, 70 + chargeProgress * 42, 15 + chargeProgress * 7)
+      .stroke({ color: 0xffd44d, alpha: 0.18 + chargeProgress * 0.6, width: 3 });
+    evolutionEnergyRing.alpha = Math.min(1, chargeProgress * 1.5);
+    evolutionEnergyRing.rotation = evolutionElapsed * 2.2;
     for (const particle of evolutionParticles) {
-      particle.life -= dt * 1.6;
-      particle.sprite.x += particle.vx * dt;
-      particle.sprite.y += particle.vy * dt;
-      particle.sprite.alpha = Math.max(0, particle.life);
+      particle.life = Math.max(0, particle.life - dt * 0.24);
+      particle.angle += particle.speed * dt * (0.7 + chargeProgress * 1.8);
+      const convergence = easeInCubic(remap(evolutionElapsed, 0.35, 1.32));
+      const radius = particle.radius * (1 - convergence * 0.82);
+      particle.sprite.position.set(
+        Math.cos(particle.angle) * radius,
+        Math.sin(particle.angle) * radius * 0.7 + particle.targetY * convergence,
+      );
+      particle.sprite.alpha = Math.max(0, particle.life) * (0.25 + chargeProgress * 0.85);
+      particle.sprite.scale.set(0.6 + chargeProgress * 0.7);
     }
-    if (evolutionElapsed >= 1.35) {
-      for (const particle of evolutionParticles) particle.sprite.destroy();
-      evolutionParticles.length = 0;
-      evolutionFx.visible = false;
-      evolutionOverlay.visible = false;
-      evolving = false;
-      progression.completeEvolution(evolutionTarget);
-      sessionTelemetry.record(time, "EVOLUTION", "MACRO", String(evolutionTarget));
-      lastEvolutionTime = time;
-      redrawPlayer();
-      redrawBasePreview();
-      pacingDirector.request("POST_EVOLUTION");
-      if (evolutionTarget === 1 && !hideTutorialCompleted) {
-        hideTutorialArmed = true;
-      }
-      if (basePreview.visible) {
-        basePreview.scale.set(0.08);
-        nestPreviewJuiceElapsed = 0;
-        nestPreviewJuiceActive = true;
-      }
-      // First upgrade presentation is guaranteed immediately after the first evolution.
-      if (evolutionTarget === 2) {
-        unlockUpgradeStationTutorial();
-        if (!evolution3FugitiveTriggered && !fugitiveSystem.active) {
-          fugitiveSystem.spawn({
-            x: Math.max(PLAYABLE_BOUNDS.left + 120, Math.min(PLAYABLE_BOUNDS.right - 120, player.x + 150)),
-            y: Math.max(PLAYABLE_BOUNDS.top + 160, player.y - 720),
-          });
-          evolution3FugitiveTriggered = true;
-          sessionTelemetry.record(time, "FUGITIVE_SPAWNED", "MACRO", "EVOLUTION_3");
-        }
-      }
-      updateUI();
+    if (!evolutionImpactTriggered && evolutionElapsed >= 1.3) {
+      evolutionImpactTriggered = true;
+      previousEvolutionSprite.visible = false;
+      nextEvolutionSprite.visible = true;
+      monsterAnimationContainer.scale.set(0.65);
+      evolutionFlash.alpha = 0.45;
+      evolutionVfx.alpha = 1;
+      evolutionVfxAnimationContainer.scale.set(1.28);
+      evolutionEnergyRing.alpha = 1;
+      evolutionFlashSfx();
+      evolutionRevealSfx();
+      shakeCamera(0.1, 5);
+      cameraPunchTime = 0.11;
+      cameraPunchDuration = 0.11;
+      cameraPunchStrength = 0.015;
+      evolutionHitStopRemaining = 0.065;
+      evolutionElapsed = 1.3;
     }
+    if (evolutionImpactTriggered) {
+      const revealProgress = easeOutBack(remap(evolutionElapsed, 1.3, 1.62));
+      monsterAnimationContainer.scale.set(0.65 + 0.47 * revealProgress);
+      evolutionFlash.alpha = Math.max(0, 0.45 * (1 - remap(evolutionElapsed, 1.3, 1.4)));
+      evolutionVfx.alpha = 1 - 0.18 * remap(evolutionElapsed, 1.3, 1.9);
+      evolutionVfxAnimationContainer.scale.set(1.28 - 0.12 * remap(evolutionElapsed, 1.3, 1.9));
+    }
+    if (!evolutionRevealTriggered && evolutionElapsed >= 1.45) {
+      evolutionRevealTriggered = true;
+      spawnEvolutionChargeParticles(5);
+    }
+    if (!evolutionRibbonTriggered && evolutionElapsed >= 1.7) {
+      evolutionRibbonTriggered = true;
+      evolutionBanner.visible = true;
+    }
+    if (evolutionRibbonTriggered) {
+      const ribbonProgress = remap(evolutionElapsed, 1.7, 2.0);
+      const ribbonBounce = ribbonProgress < 0.65
+        ? easeOutBack(ribbonProgress / 0.65)
+        : 1 - 0.04 * Math.sin(remap(ribbonProgress, 0.65, 1) * Math.PI);
+      evolutionBanner.alpha = easeOutCubic(ribbonProgress);
+      ribbonAnimationContainer.scale.set(0.5 + 0.58 * ribbonBounce);
+      ribbonLayoutContainer.y = (evolutionLayout?.ribbonY ?? -180) - 12 * (1 - easeOutCubic(ribbonProgress));
+    }
+    if (!evolutionLevelTriggered && evolutionElapsed >= 2.05) {
+      evolutionLevelTriggered = true;
+      evolutionLevelPlate.visible = true;
+      evolutionLevel.visible = true;
+      evolutionLevelSfx();
+    }
+    if (evolutionLevelTriggered) {
+      const levelProgress = 0.75 + 0.3 * easeOutBack(remap(evolutionElapsed, 2.05, 2.3));
+      evolutionLevelPlate.alpha = Math.min(1, remap(evolutionElapsed, 2.05, 2.2));
+      evolutionLevel.alpha = evolutionLevelPlate.alpha;
+      levelAnimationContainer.scale.set(levelProgress);
+      levelLayoutContainer.y = (evolutionLayout?.levelY ?? 180) + 10 * (1 - easeOutCubic(remap(evolutionElapsed, 2.05, 2.3)));
+    }
+    if (evolutionElapsed >= 2.3) {
+      const idle = Math.sin((evolutionElapsed - 2.3) * 3.2);
+      monsterAnimationContainer.y = idle * 2.5;
+      evolutionVfx.rotation += dt * 0.8;
+      ribbonLayoutContainer.y = (evolutionLayout?.ribbonY ?? -180) + Math.sin((evolutionElapsed - 2.3) * 1.8) * 1.5;
+    }
+    if (evolutionSkipRequested || evolutionElapsed >= 3.2) finishEvolutionSequence();
+  }
+
+  function finishEvolutionSequence() {
+    if (!evolving) return;
+    for (const particle of evolutionParticles) particle.sprite.destroy();
+    evolutionParticles.length = 0;
+    evolutionFx.visible = false;
+    evolutionOverlay.visible = false;
+    evolutionOverlay.eventMode = "none";
+    evolutionOverlay.alpha = 0;
+    ui.alpha = 1;
+    evolving = false;
+    progression.completeEvolution(evolutionTarget);
+    waterWorldCounter.text = `${Math.min(10, progression.stageIndex + 1)}/10`;
+    sessionTelemetry.record(time, "EVOLUTION", "MACRO", String(evolutionTarget));
+    lastEvolutionTime = time;
+    redrawPlayer();
+    redrawBasePreview();
+    pacingDirector.request("POST_EVOLUTION");
+    if (evolutionTarget === 1 && !hideTutorialCompleted) hideTutorialArmed = true;
+    if (basePreview.visible) {
+      basePreview.scale.set(0.08);
+      nestPreviewJuiceElapsed = 0;
+      nestPreviewJuiceActive = true;
+    }
+    if (evolutionTarget === 2) {
+      unlockUpgradeStationTutorial();
+      if (!evolution3FugitiveTriggered && !fugitiveSystem.active) {
+        fugitiveSystem.spawn({
+          x: Math.max(PLAYABLE_BOUNDS.left + 120, Math.min(PLAYABLE_BOUNDS.right - 120, player.x + 150)),
+          y: Math.max(PLAYABLE_BOUNDS.top + 160, player.y - 720),
+        });
+        evolution3FugitiveTriggered = true;
+        sessionTelemetry.record(time, "FUGITIVE_SPAWNED", "MACRO", "EVOLUTION_3");
+      }
+    }
+    updateUI();
   }
 
   function spawnCurrencyJuice(amount: number, coinEggCount = 0) {
@@ -3479,6 +4221,7 @@ async function bootstrap() {
 
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS / 1000;
+    updateUpgradeTutorialHand(dt);
     if (upgradeMenuOpen || sdkAdPlaying) return;
     time += dt;
     powerUpManager.update(dt);
@@ -3487,6 +4230,12 @@ async function bootstrap() {
     trySpawnContextualPowerUp();
     goldMineSystem.update(dt, time, player.position);
     const goldMineSnapshot = goldMineSystem.getSnapshot();
+    if (firstGoldMineSpawned && goldMineSnapshot.state === "EXHAUSTED") {
+      eggMineMarkersRetired = true;
+    }
+    eggMineMarkers.visible =
+      !eggMineMarkersRetired &&
+      upgradeStationUnlocked;
     if (
       goldMineSnapshot.state === "ACTIVE" &&
       lastObservedGoldMineState !== "ACTIVE" &&
@@ -3496,7 +4245,10 @@ async function bootstrap() {
       pacingDirector.recordReward("GoldMine", "SURPRISE", "HIGH");
       sessionTelemetry.record(time, "GOLD_MINE_ACTIVATED", "MACRO");
     }
-    if (goldMineSnapshot.state === "EXHAUSTED" && lastObservedGoldMineState !== "EXHAUSTED") {
+    if (
+      goldMineSnapshot.state === "EXHAUSTED" &&
+      lastObservedGoldMineState !== "EXHAUSTED"
+    ) {
       sessionTelemetry.record(time, "GOLD_MINE_COMPLETED", "MACRO");
     }
     lastObservedGoldMineState = goldMineSnapshot.state;
@@ -3514,7 +4266,8 @@ async function bootstrap() {
       console.debug("[RANGE EGG] Expired");
     }
     rangeWasActive = rangeActive;
-    const orbitActive = powerUpManager.getActive(SpecialEggType.Orbit) !== undefined;
+    const orbitActive =
+      powerUpManager.getActive(SpecialEggType.Orbit) !== undefined;
     const orbitJustActivated = !orbitWasActive && orbitActive;
     if (orbitWasActive !== orbitActive) {
       orbitWasActive = orbitActive;
@@ -3579,8 +4332,10 @@ async function bootstrap() {
       }
     }
     const cheapestUpgrade = Math.min(
-      UPGRADE_CONFIG.initialCost + upgradeLevels.speed * UPGRADE_CONFIG.costStep,
-      UPGRADE_CONFIG.initialCost + upgradeLevels.pickupRadius * UPGRADE_CONFIG.costStep,
+      UPGRADE_CONFIG.initialCost +
+        upgradeLevels.speed * UPGRADE_CONFIG.costStep,
+      UPGRADE_CONFIG.initialCost +
+        upgradeLevels.pickupRadius * UPGRADE_CONFIG.costStep,
     );
     upgradeAlert.visible = currency >= cheapestUpgrade;
     if (upgradeAlert.visible) {
@@ -3589,7 +4344,8 @@ async function bootstrap() {
     }
     pickupFlash = Math.max(0, pickupFlash - dt);
     eggSystem.updateWorldEggMotion(dt, time);
-    const rangeIndicatorActive = powerUpManager.getActive(SpecialEggType.Range) !== undefined;
+    const rangeIndicatorActive =
+      powerUpManager.getActive(SpecialEggType.Range) !== undefined;
     if (pickupFlash > 0) {
       const progress = 1 - pickupFlash / 0.42;
       pickupIndicator.alpha = rangeIndicatorActive
@@ -3637,7 +4393,9 @@ async function bootstrap() {
     handlePlayerRegionTransition();
     updateSessionPacing(dt);
     if (!playerHidden) {
-      eggSystem.updateBushReleaseDistance(distance(player.position, previousPlayerPosition));
+      eggSystem.updateBushReleaseDistance(
+        distance(player.position, previousPlayerPosition),
+      );
     }
     const upgradeDistance = distance(player.position, upgradeStation.position);
     if (!upgradeStationArmed && upgradeDistance > 160) {
@@ -3675,7 +4433,11 @@ async function bootstrap() {
         ui.setChildIndex(upgradeOverlay, ui.children.length - 1);
         ui.setChildIndex(upgradePanel, ui.children.length - 1);
         ui.setChildIndex(upgradeCurrencyHud, ui.children.length - 1);
+        // Safety net for the normal station flow: the first panel opening
+        // always starts the visual tutorial on the left upgrade card.
+        if (upgradeTutorialStep === 0) upgradeTutorialStep = 1;
         refreshUpgradeButtons();
+        refreshUpgradeTutorialHand();
       }
     } else if (!upgradeMenuOpen) {
       upgradeContactProgress = Math.max(0, upgradeContactProgress - dt * 2.5);
@@ -3744,7 +4506,12 @@ async function bootstrap() {
             normalPowerUpEntities.delete(specialEgg.type);
             pendingNormalPowerUpRespawns.add(specialEgg.type);
           }
-          sessionTelemetry.record(time, "POWER_UP_COLLECTED", "MEDIUM", specialEgg.type);
+          sessionTelemetry.record(
+            time,
+            "POWER_UP_COLLECTED",
+            "MEDIUM",
+            specialEgg.type,
+          );
           const wasActive =
             powerUpManager.getActive(specialEgg.type) !== undefined;
           const activated = powerUpManager.activate(
@@ -4024,7 +4791,12 @@ async function bootstrap() {
         currency += depositTotals.coins;
         spawnCurrencyJuice(depositTotals.coins, depositTotals.coinEggs);
         upgradePoints += depositTotals.progress;
-        sessionTelemetry.record(time, "DEPOSIT", "MACRO", `${depositedCount} eggs`);
+        sessionTelemetry.record(
+          time,
+          "DEPOSIT",
+          "MACRO",
+          `${depositedCount} eggs`,
+        );
         carried = 0;
         baseVisualDelivered = progression.delivered;
         for (const egg of depositingEggs) eggSystem.releaseEgg(egg);
@@ -4038,6 +4810,7 @@ async function bootstrap() {
           evolutionDelayRemaining = DEPOSIT_FEEDBACK.evolutionDelay;
         } else {
           progression.completeEvolution(delivery.unlockedIndex);
+          waterWorldCounter.text = `${Math.min(10, progression.stageIndex + 1)}/10`;
           redrawPlayer();
           redrawBasePreview();
           updateUI();
@@ -4097,7 +4870,11 @@ async function bootstrap() {
           };
         }
         if (orbitLayoutActive) {
-          const orbitTarget = getOrbitSlotPosition(i, eggSystem.carriedEggs.length, time);
+          const orbitTarget = getOrbitSlotPosition(
+            i,
+            eggSystem.carriedEggs.length,
+            time,
+          );
           if (!orbitActive) {
             const orbitBlend = Math.min(
               1,
@@ -4140,26 +4917,30 @@ async function bootstrap() {
         for (const egg of inFrontOfPlayer) {
           world.setChildIndex(
             egg,
-            Math.min(world.children.length - 1, world.getChildIndex(player) + 1),
+            Math.min(
+              world.children.length - 1,
+              world.getChildIndex(player) + 1,
+            ),
           );
         }
       }
     } else {
-      stackVisualController.update(
-        dt,
-        carried,
-        depositing ? "TRAIL" : "BUSH",
-      );
+      stackVisualController.update(dt, carried, depositing ? "TRAIL" : "BUSH");
     }
     cameraShakeTime = Math.max(0, cameraShakeTime - dt);
+    cameraPunchTime = Math.max(0, cameraPunchTime - dt);
     const shake =
       cameraShakeTime > 0
         ? cameraShakeStrength * (cameraShakeTime / cameraShakeDuration)
         : 0;
+    const punch =
+      cameraPunchTime > 0
+        ? cameraPunchStrength * (cameraPunchTime / cameraPunchDuration)
+        : 0;
     const shakeX = shake ? (Math.random() * 2 - 1) * shake : 0;
     const shakeY = shake ? (Math.random() * 2 - 1) * shake : 0;
     const cameraTarget = getCameraTarget(shakeX, shakeY);
-    camera.scale.set(CAMERA_ZOOM);
+    camera.scale.set(CAMERA_ZOOM * (1 + punch));
     camera.x += (cameraTarget.x - camera.x) * Math.min(1, dt * 7);
     camera.y += (cameraTarget.y - camera.y) * Math.min(1, dt * 7);
     const cameraReady =
@@ -4186,23 +4967,38 @@ async function bootstrap() {
     tryRespawnGoldMine();
     const telemetryDirectorState = pacingDirector.getDebugState().state;
     if (telemetryDirectorState) {
-      const visibleEggs = eggSystem.getActiveWorldEggs().filter((egg) => isVisibleOpportunityPosition(egg.position)).length;
-      const nearbyEggs = eggSystem.getActiveWorldEggs().filter((egg) => distance(player.position, egg.position) < 1150).length;
+      const visibleEggs = eggSystem
+        .getActiveWorldEggs()
+        .filter((egg) => isVisibleOpportunityPosition(egg.position)).length;
+      const nearbyEggs = eggSystem
+        .getActiveWorldEggs()
+        .filter((egg) => distance(player.position, egg.position) < 1150).length;
       const mineState = goldMineSystem.getSnapshot().state;
-      const activeMajorEvent = fugitiveSystem.active || ["ACTIVE", "EXTRACTING", "FINAL_JACKPOT"].includes(mineState) || evolving;
+      const activeMajorEvent =
+        fugitiveSystem.active ||
+        ["ACTIVE", "EXTRACTING", "FINAL_JACKPOT"].includes(mineState) ||
+        evolving;
       sessionTelemetry.update(time, {
         activity: telemetryDirectorState.playerIntent,
         intent: telemetryDirectorState.playerIntent,
-        intensity: Math.min(1, (carried > 0 ? 0.3 : 0) +
-          telemetryDirectorState.nearbyEnemyCount * 0.15 +
-          telemetryDirectorState.activePowerUps.length * 0.2 +
-          (fugitiveSystem.active ? 0.9 : 0) +
-          (["ACTIVE", "EXTRACTING", "FINAL_JACKPOT"].includes(mineState) ? 1 : 0) +
-          (depositing ? 0.6 : 0) + (evolving ? 1 : 0)),
+        intensity: Math.min(
+          1,
+          (carried > 0 ? 0.3 : 0) +
+            telemetryDirectorState.nearbyEnemyCount * 0.15 +
+            telemetryDirectorState.activePowerUps.length * 0.2 +
+            (fugitiveSystem.active ? 0.9 : 0) +
+            (["ACTIVE", "EXTRACTING", "FINAL_JACKPOT"].includes(mineState)
+              ? 1
+              : 0) +
+            (depositing ? 0.6 : 0) +
+            (evolving ? 1 : 0),
+        ),
         visibleEggs,
         nearbyEggs,
-        visibleOpportunities: specialEggSystem.entities.filter((entity) => isVisibleOpportunityPosition(entity.container.position)).length +
-          (postEvolutionOpportunity ? 1 : 0),
+        visibleOpportunities:
+          specialEggSystem.entities.filter((entity) =>
+            isVisibleOpportunityPosition(entity.container.position),
+          ).length + (postEvolutionOpportunity ? 1 : 0),
         activeMajorEvent,
         returning: telemetryDirectorState.playerIntent === "RETURNING_HOME",
         depositing,

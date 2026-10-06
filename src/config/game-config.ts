@@ -35,6 +35,8 @@ export const STAGES = [
   { name: "Celestial", threshold: 122, color: 0xff82d5, scale: 2.04 },
   { name: "Ancient", threshold: 153, color: 0xd7a7ff, scale: 2.18 },
   { name: "Apex", threshold: 188, color: 0xffe27a, scale: 2.32 },
+  // The portal is the eleventh collection entry and is previewed at the nest.
+  { name: "Water World", threshold: 230, color: 0x63d8ff, scale: 2.42 },
 ] as const;
 
 export const getStageVisualScale = (stageIndex: number) =>

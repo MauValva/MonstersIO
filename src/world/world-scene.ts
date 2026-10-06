@@ -1,6 +1,5 @@
-import { Container, Sprite, TilingSprite, Texture } from "pixi.js";
+import { Container, Rectangle, Sprite, TilingSprite, Texture } from "pixi.js";
 import { PLAYABLE_BOUNDS, PLANT_POSITIONS, WORLD } from "../config/game-config";
-import { gridTextures } from "../art-textures";
 
 export type Bush = {
   sprite: Sprite;
@@ -16,44 +15,127 @@ export function createWorldScene(
   groundAtlas: Texture,
   groundPath: string,
   plantTexture: Texture,
+  edgeStoneTexture: Texture,
 ) {
-  const groundFrames = gridTextures(groundAtlas, groundPath, 3, 1);
-  const groundTileSize = groundFrames[0].width;
-  const groundResolutionScale = 724 / groundTileSize;
-  const waterGround = new TilingSprite({ texture: groundFrames[2], width: WORLD.width, height: WORLD.height });
-  waterGround.position.set(0, WORLD.top);
-  waterGround.tileScale.set(0.42 * groundResolutionScale);
-  world.addChild(waterGround);
+  // The original atlas is three 512px tiles separated by 1px guide columns.
+  // The optimized derivative adds 2px repeat guards around each 512px frame.
+  // Keep both layouts explicit instead of deriving fractional cell widths.
+  const groundFrames = Array.from({ length: 3 }, (_, index) => {
+    const optimized = groundPath.includes("/Optimized/");
+    const cellSize = optimized ? 516 : 513;
+    const inset = optimized ? 2 : 0;
+    const originalStarts = [0, 513, 1027];
+    return new Texture({
+      source: groundAtlas.source,
+      frame: new Rectangle(
+        optimized ? index * cellSize + inset : originalStarts[index],
+        inset,
+        512,
+        512,
+      ),
+    });
+  });
+  // Base pass: grass remains underneath the entire world, while water fills
+  // the regions outside the playable bounds.
   const grassGround = new TilingSprite({
     texture: groundFrames[0],
-    width: PLAYABLE_BOUNDS.right - PLAYABLE_BOUNDS.left,
-    height: PLAYABLE_BOUNDS.bottom - PLAYABLE_BOUNDS.top,
+    width: WORLD.width,
+    height: WORLD.height,
   });
-  grassGround.position.set(PLAYABLE_BOUNDS.left, PLAYABLE_BOUNDS.top);
-  grassGround.tileScale.set(0.42 * groundResolutionScale);
+  grassGround.anchor.set(0.5);
+  grassGround.position.set(WORLD.width / 2, (WORLD.top + WORLD.bottom) / 2);
+  grassGround.rotation = Math.PI;
+  grassGround.tileScale.set(0.42 * (724 / groundFrames[0].width));
   world.addChild(grassGround);
-  const shorelineScale = 0.38 * groundResolutionScale;
-  const shorelineWidth = groundTileSize * shorelineScale;
-  const verticalShore = (x: number, rotation: number) => {
-    const shore = new TilingSprite({ texture: groundFrames[1], width: shorelineWidth, height: WORLD.height });
-    shore.anchor.set(0.5);
-    shore.position.set(x, (WORLD.top + WORLD.bottom) / 2);
-    shore.rotation = rotation;
-    shore.tileScale.set(shorelineScale);
-    world.addChild(shore);
+  const waterTileScale = 0.42 * (724 / groundFrames[2].width);
+  const addWaterRegion = (x: number, y: number, width: number, height: number) => {
+    if (width <= 0 || height <= 0) return;
+    const water = new TilingSprite({
+      texture: groundFrames[2],
+      width,
+      height,
+    });
+    water.position.set(x, y);
+    water.tileScale.set(waterTileScale);
+    world.addChild(water);
   };
-  const horizontalShore = (y: number, rotation: number) => {
-    const shore = new TilingSprite({ texture: groundFrames[1], width: shorelineWidth, height: WORLD.width });
-    shore.anchor.set(0.5);
-    shore.position.set(WORLD.width / 2, y);
-    shore.rotation = rotation;
-    shore.tileScale.set(shorelineScale);
-    world.addChild(shore);
+  const playableHeight = PLAYABLE_BOUNDS.bottom - PLAYABLE_BOUNDS.top;
+  addWaterRegion(0, WORLD.top, WORLD.width, PLAYABLE_BOUNDS.top - WORLD.top);
+  addWaterRegion(0, PLAYABLE_BOUNDS.bottom, WORLD.width, WORLD.bottom - PLAYABLE_BOUNDS.bottom);
+  addWaterRegion(0, PLAYABLE_BOUNDS.top, PLAYABLE_BOUNDS.left, playableHeight);
+  addWaterRegion(PLAYABLE_BOUNDS.right, PLAYABLE_BOUNDS.top, WORLD.width - PLAYABLE_BOUNDS.right, playableHeight);
+
+  // Shoreline pass: start at the centered mixed tile and repeat it toward the
+  // map corners. Its source art runs from grass to water left-to-right, so
+  // each edge gets the rotation that keeps grass on the playable side.
+  const mixedTileScale = waterTileScale;
+  const mixedBandSize = groundFrames[1].width * mixedTileScale;
+  const addMixedBoundary = (
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    rotation: number,
+  ) => {
+    const mixed = new TilingSprite({
+      texture: groundFrames[1],
+      width,
+      height,
+    });
+    mixed.anchor.set(0.5);
+    mixed.position.set(x, y);
+    mixed.tileScale.set(mixedTileScale);
+    mixed.tileTransform.rotation = rotation;
+    world.addChild(mixed);
   };
-  verticalShore(PLAYABLE_BOUNDS.left, Math.PI);
-  verticalShore(PLAYABLE_BOUNDS.right, 0);
-  horizontalShore(PLAYABLE_BOUNDS.top, -Math.PI / 2);
-  horizontalShore(PLAYABLE_BOUNDS.bottom, Math.PI / 2);
+  const playableWidth = PLAYABLE_BOUNDS.right - PLAYABLE_BOUNDS.left;
+  const playableCenterX = (PLAYABLE_BOUNDS.left + PLAYABLE_BOUNDS.right) / 2;
+  const playableCenterY = (PLAYABLE_BOUNDS.top + PLAYABLE_BOUNDS.bottom) / 2;
+  addMixedBoundary(
+    playableCenterX,
+    PLAYABLE_BOUNDS.top,
+    playableWidth,
+    mixedBandSize,
+    -Math.PI / 2,
+  );
+  addMixedBoundary(
+    playableCenterX,
+    PLAYABLE_BOUNDS.bottom,
+    playableWidth,
+    mixedBandSize,
+    Math.PI / 2,
+  );
+  addMixedBoundary(
+    PLAYABLE_BOUNDS.left,
+    playableCenterY,
+    mixedBandSize,
+    playableHeight,
+    Math.PI,
+  );
+  addMixedBoundary(
+    PLAYABLE_BOUNDS.right,
+    playableCenterY,
+    mixedBandSize,
+    playableHeight,
+    0,
+  );
+
+  // Corner pass: keep the artwork orientation unchanged. Mirror only the
+  // stones on the left side so they face the same way as the right side.
+  const edgeStoneScale = mixedTileScale;
+  const addEdgeStone = (x: number, y: number, mirrorX = false) => {
+    const edgeStone = new Sprite(edgeStoneTexture);
+    edgeStone.anchor.set(0.5);
+    edgeStone.position.set(x, y);
+    edgeStone.scale.set(edgeStoneScale);
+    if (mirrorX) edgeStone.scale.x *= -1;
+    world.addChild(edgeStone);
+  };
+  addEdgeStone(PLAYABLE_BOUNDS.left, PLAYABLE_BOUNDS.top, true);
+  addEdgeStone(PLAYABLE_BOUNDS.right, PLAYABLE_BOUNDS.top);
+  addEdgeStone(PLAYABLE_BOUNDS.left - 48, PLAYABLE_BOUNDS.bottom, true);
+  addEdgeStone(PLAYABLE_BOUNDS.right + 48, PLAYABLE_BOUNDS.bottom);
+
   const obstacles = new Container();
   world.addChild(obstacles);
   const bushes: Bush[] = [];

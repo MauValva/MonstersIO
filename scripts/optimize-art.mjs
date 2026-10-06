@@ -13,7 +13,11 @@ const plans = {
     { key: 'enemyNest', source: 'Environment/enemyNest.png', columns: 2, rows: 1, frameWidth: 384, frameHeight: 384, padding: 2, display: [296,296] },
   ],
   eggs: [{ key: 'eggs', source: 'Eggs/spr_Eggs.png', columns: 5, rows: 3, frameWidth: 180, frameHeight: 150, padding: 2, display: [140,117] }],
-  ground: [{ key: 'ground', source: 'Environment/Tile_Ground_V2.png', columns: 3, rows: 1, frameWidth: 512, frameHeight: 512, padding: 2, repeat: true, display: [390,390] }],
+  ground: [{ key: 'ground', source: 'Environment/Tile_Ground_V2.png', columns: 3, rows: 1, frameWidth: 512, frameHeight: 512, padding: 2, repeat: true, sourceFrames: [
+    { left: 0, top: 0, width: 512, height: 512 },
+    { left: 513, top: 0, width: 512, height: 512 },
+    { left: 1027, top: 0, width: 512, height: 512 },
+  ], display: [390,390] }],
 };
 assert.ok(plans[group], 'Choose props, eggs or ground');
 const outDir = 'public/assets/Optimized';
@@ -43,8 +47,13 @@ for (const plan of plans[group]) {
     const col=index%columns, row=Math.floor(index/columns);
     // Round only source pixel boundaries. Logical dimensions remain the original
     // fractional grid, and the destination content frames are all identical integers.
-    const left=Math.round(col*metadata.width/columns), top=Math.round(row*metadata.height/rows);
-    const right=Math.round((col+1)*metadata.width/columns), bottom=Math.round((row+1)*metadata.height/rows);
+    const explicitFrame = plan.sourceFrames?.[index];
+    const left = explicitFrame?.left ?? Math.round(col*metadata.width/columns);
+    const top = explicitFrame?.top ?? Math.round(row*metadata.height/rows);
+    const sourceWidth = explicitFrame?.width ?? Math.round((col+1)*metadata.width/columns) - left;
+    const sourceHeight = explicitFrame?.height ?? Math.round((row+1)*metadata.height/rows) - top;
+    const right = left + sourceWidth;
+    const bottom = top + sourceHeight;
     const sourceFrame = await sharp(original).extract({left,top,width:right-left,height:bottom-top}).png().toBuffer();
     let rgba;
     if(plan.repeat) {

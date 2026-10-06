@@ -5,14 +5,30 @@
         "sha256":  "8D0B843F216C9AF70C92574516AEA7F3210C46B5FBE8ADBE5804A3D9EE62D8E7"
     },
     {
+        "path":  "public/assets/Arts/Eggs/Features.png",
+        "bytes":  548598,
+        "sha256":  "95F7EB6CD1E0AD6788D798483C4FE4F2E514430E633F0499CA3F5DBA83FAF9E1",
+        "width":  1024,
+        "height":  512,
+        "gpuBytes":  2097152,
+        "transparentPixels":  292511,
+        "partialAlphaPixels":  230905,
+        "contentBounds":  [
+                              13,
+                              45,
+                              1024,
+                              512
+                          ]
+    },
+    {
         "path":  "public/assets/Arts/Eggs/spr_Eggs.png",
-        "bytes":  1359504,
-        "sha256":  "3A046E45E5498CF463DEF9AA784CD7345AF90E39A9DCE77EDE746B68BA02C906",
+        "bytes":  1353573,
+        "sha256":  "B617D4919410C4D52BCC7DB13445846A90616720178686181465F9278BC989E0",
         "width":  1774,
         "height":  887,
         "gpuBytes":  6294152,
-        "transparentPixels":  761601,
-        "partialAlphaPixels":  811812,
+        "transparentPixels":  760889,
+        "partialAlphaPixels":  641062,
         "contentBounds":  [
                               146,
                               6,
@@ -34,6 +50,22 @@
                               0,
                               1774,
                               887
+                          ]
+    },
+    {
+        "path":  "public/assets/Arts/Environment/EggMineWaterWorld.png",
+        "bytes":  484303,
+        "sha256":  "FF12AF6C167F8086677046C37A8D758AB3AEAFE904560B9501F92B50C312D3E4",
+        "width":  1024,
+        "height":  309,
+        "gpuBytes":  1265664,
+        "transparentPixels":  135058,
+        "partialAlphaPixels":  167363,
+        "contentBounds":  [
+                              0,
+                              0,
+                              1024,
+                              309
                           ]
     },
     {
@@ -102,18 +134,18 @@
     },
     {
         "path":  "public/assets/Arts/Environment/Tile_Ground_V2.png",
-        "bytes":  1647895,
-        "sha256":  "722B23ECC75EE04358C08795510BEBDE9387D78A3518F2E3768EC7671209C301",
-        "width":  2172,
-        "height":  724,
-        "gpuBytes":  6290112,
-        "transparentPixels":  0,
-        "partialAlphaPixels":  0,
+        "bytes":  982860,
+        "sha256":  "6CBFBE5BEB34CBFC3DB46DA1D5C13A8324659800EF07EB92DDFA005EB7566A4C",
+        "width":  1540,
+        "height":  512,
+        "gpuBytes":  3153920,
+        "transparentPixels":  126704,
+        "partialAlphaPixels":  154075,
         "contentBounds":  [
                               0,
                               0,
-                              2172,
-                              724
+                              1540,
+                              512
                           ]
     },
     {
@@ -150,29 +182,45 @@
     },
     {
         "path":  "public/assets/Arts/Player/Player_EvoMonster.png",
-        "bytes":  2333710,
-        "sha256":  "7362A622D57CDCCF4272CDBD98E2F7A48F0A6EDF43F67376E8A137DC5E081B28",
+        "bytes":  2373995,
+        "sha256":  "C9F561DA34A15744E390BEEA763F418760C29B4BC614448935CFC29D0246DD9F",
         "width":  2095,
         "height":  1080,
         "gpuBytes":  9050400,
-        "transparentPixels":  1553001,
-        "partialAlphaPixels":  709104,
+        "transparentPixels":  1657351,
+        "partialAlphaPixels":  604852,
         "contentBounds":  [
-                              14,
+                              122,
                               157,
                               2095,
                               1080
                           ]
     },
     {
+        "path":  "public/assets/Arts/UI/UI_Evolution.png",
+        "bytes":  906903,
+        "sha256":  "10EBEEB30970405A32451030C63C904531515DF753EC72C2283348F8636EFAC9",
+        "width":  717,
+        "height":  1024,
+        "gpuBytes":  2936832,
+        "transparentPixels":  171588,
+        "partialAlphaPixels":  562284,
+        "contentBounds":  [
+                              0,
+                              0,
+                              717,
+                              1024
+                          ]
+    },
+    {
         "path":  "public/assets/Arts/UI/UI_HUD.png",
-        "bytes":  124839,
-        "sha256":  "E3F11DE7A4E0F742598102DF6881A700C60AB03D4D761618EF7C69670E01AB6D",
+        "bytes":  110003,
+        "sha256":  "1724CD32C7608BA164CD0F939256083B2DD1DA648F6C0778CBB85A1F27C33E87",
         "width":  644,
         "height":  318,
         "gpuBytes":  819168,
-        "transparentPixels":  152577,
-        "partialAlphaPixels":  6792,
+        "transparentPixels":  152212,
+        "partialAlphaPixels":  9929,
         "contentBounds":  [
                               4,
                               54,
@@ -182,18 +230,114 @@
     },
     {
         "path":  "public/assets/Arts/UI/UI_Upgrades.png",
-        "bytes":  1023664,
-        "sha256":  "F98953C87BDB8C180049110D1A48EB68049797A461EB394D8A9FADE84868FF7D",
+        "bytes":  946609,
+        "sha256":  "90D35D1E8C2A2788AE37D1B163FCD947BE1A7FF09BF1935FF458410C7FD6DC89",
         "width":  1983,
         "height":  793,
         "gpuBytes":  6290076,
-        "transparentPixels":  784977,
-        "partialAlphaPixels":  783944,
+        "transparentPixels":  539955,
+        "partialAlphaPixels":  57896,
         "contentBounds":  [
                               0,
-                              64,
-                              1963,
-                              770
+                              85,
+                              1983,
+                              793
+                          ]
+    },
+    {
+        "path":  "public/assets/Optimized/Enemies.png",
+        "bytes":  177870,
+        "sha256":  "BB910E7E794B37814966A0014B552C773C5991BA6B6C4C3B202EAA218272EFD4",
+        "width":  520,
+        "height":  260,
+        "gpuBytes":  540800,
+        "transparentPixels":  39338,
+        "partialAlphaPixels":  95836,
+        "contentBounds":  [
+                              0,
+                              0,
+                              520,
+                              260
+                          ]
+    },
+    {
+        "path":  "public/assets/Optimized/enemyNest.png",
+        "bytes":  518602,
+        "sha256":  "86BD8B0F6492B1A660982BD6924CED5D24F031AF94CFBBE24E96BCF324827666",
+        "width":  776,
+        "height":  388,
+        "gpuBytes":  1204352,
+        "transparentPixels":  159565,
+        "partialAlphaPixels":  141423,
+        "contentBounds":  [
+                              149,
+                              51,
+                              776,
+                              388
+                          ]
+    },
+    {
+        "path":  "public/assets/Optimized/Plant.png",
+        "bytes":  168387,
+        "sha256":  "22B37646F5AD2E0B3DF6FDBE67DD02F9D1D5CFFAC969079D9CAE01679BC466C1",
+        "width":  512,
+        "height":  461,
+        "gpuBytes":  944128,
+        "transparentPixels":  233235,
+        "partialAlphaPixels":  2792,
+        "contentBounds":  [
+                              477,
+                              364,
+                              512,
+                              461
+                          ]
+    },
+    {
+        "path":  "public/assets/Optimized/spr_Eggs.png",
+        "bytes":  418381,
+        "sha256":  "66587D563CACFBC622B4A34D2001D70B519EBF272B3804F8DE5D3D85D69411AD",
+        "width":  920,
+        "height":  462,
+        "gpuBytes":  1700160,
+        "transparentPixels":  246458,
+        "partialAlphaPixels":  178348,
+        "contentBounds":  [
+                              213,
+                              16,
+                              920,
+                              462
+                          ]
+    },
+    {
+        "path":  "public/assets/Optimized/Tile_Ground_V2.png",
+        "bytes":  1041701,
+        "sha256":  "58AF32CE1FDABAEC67090CC98C8EA6791E451CD4798182DF305ECA612E2F343C",
+        "width":  1548,
+        "height":  516,
+        "gpuBytes":  3195072,
+        "transparentPixels":  0,
+        "partialAlphaPixels":  0,
+        "contentBounds":  [
+                              0,
+                              0,
+                              1548,
+                              516
+                          ]
+    },
+    {
+        "path":  "public/assets/Optimized/UpgradeBase.png",
+        "bytes":  180743,
+        "sha256":  "68653ACAF1B718492BF9E20F34DA7CCB264DB699FD7116BACE624000AC32AC25",
+        "width":  384,
+        "height":  375,
+        "gpuBytes":  576000,
+        "transparentPixels":  141413,
+        "partialAlphaPixels":  2587,
+        "contentBounds":  [
+                              326,
+                              324,
+                              384,
+                              375
                           ]
     }
 ]

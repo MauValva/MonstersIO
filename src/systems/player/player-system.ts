@@ -86,14 +86,17 @@ export function createPlayerSystem(deps: PlayerSystemDependencies) {
   }
 
   function redraw() {
-    const stage = STAGES[Math.min(deps.getStageIndex(), STAGES.length - 1)];
-    playerEvolution.texture = deps.evolutionFrames[Math.min(deps.getStageIndex(), deps.evolutionFrames.length - 1)];
-    playerEvolution.width = 105 * stage.scale;
-    playerEvolution.height = 135 * stage.scale;
+    const stageIndex = deps.getStageIndex();
+    const stage = STAGES[Math.min(stageIndex, STAGES.length - 1)];
+    const isFourthEvolution = stageIndex === 3;
+    const evolutionSizeMultiplier = isFourthEvolution ? 1.18 : 1;
+    playerEvolution.texture = deps.evolutionFrames[Math.min(stageIndex, deps.evolutionFrames.length - 1)];
+    playerEvolution.width = 105 * stage.scale * evolutionSizeMultiplier;
+    playerEvolution.height = 135 * stage.scale * evolutionSizeMultiplier;
     playerCloud.width = 118 * stage.scale;
     playerCloud.height = 59 * stage.scale;
     playerCloud.position.set(0, 52 * stage.scale);
-    playerCloud.visible = deps.getStageIndex() < STAGES.length - 2;
+    playerCloud.visible = !isFourthEvolution && stageIndex < STAGES.length - 2;
     playerEvolution.position.set(0, -10 * stage.scale);
     playerBody.clear()
       .circle(0, 0, 45 * stage.scale)

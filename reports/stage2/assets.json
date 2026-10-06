@@ -410,6 +410,26 @@
     "frameHeight": 512,
     "padding": 2,
     "repeat": true,
+    "sourceFrames": [
+      {
+        "left": 0,
+        "top": 0,
+        "width": 512,
+        "height": 512
+      },
+      {
+        "left": 513,
+        "top": 0,
+        "width": 512,
+        "height": 512
+      },
+      {
+        "left": 1027,
+        "top": 0,
+        "width": 512,
+        "height": 512
+      }
+    ],
     "display": [
       390,
       390
@@ -418,10 +438,10 @@
     "outputPath": "public/assets/Optimized/Tile_Ground_V2.png",
     "webpPath": "reports/stage2/comparisons/Tile_Ground_V2.webp",
     "comparisonPath": "reports/stage2/comparisons/ground.png",
-    "originalWidth": 2172,
-    "originalHeight": 724,
-    "originalBytes": 1647895,
-    "originalHash": "722B23ECC75EE04358C08795510BEBDE9387D78A3518F2E3768EC7671209C301",
+    "originalWidth": 1540,
+    "originalHeight": 512,
+    "originalBytes": 982860,
+    "originalHash": "6CBFBE5BEB34CBFC3DB46DA1D5C13A8324659800EF07EB92DDFA005EB7566A4C",
     "width": 1548,
     "height": 516,
     "frames": [
@@ -433,8 +453,8 @@
         "sourceBounds": {
           "left": 0,
           "top": 0,
-          "right": 724,
-          "bottom": 724
+          "right": 512,
+          "bottom": 512
         }
       },
       {
@@ -443,10 +463,10 @@
         "width": 512,
         "height": 512,
         "sourceBounds": {
-          "left": 724,
+          "left": 513,
           "top": 0,
-          "right": 1448,
-          "bottom": 724
+          "right": 1025,
+          "bottom": 512
         }
       },
       {
@@ -455,17 +475,17 @@
         "width": 512,
         "height": 512,
         "sourceBounds": {
-          "left": 1448,
+          "left": 1027,
           "top": 0,
-          "right": 2172,
-          "bottom": 724
+          "right": 1539,
+          "bottom": 512
         }
       }
     ],
-    "pngBytes": 1050537,
-    "webpBytes": 739820,
+    "pngBytes": 960462,
+    "webpBytes": 673802,
     "visibleDifferences": 0,
     "alphaDifferences": 0,
-    "maxDisplayMeanAbsoluteError": 0.3287069910146833
+    "maxDisplayMeanAbsoluteError": 0.00893271970195047
   }
 }
