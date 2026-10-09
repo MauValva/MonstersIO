@@ -60,6 +60,7 @@ type BurstParticle = {
 };
 
 export function createGoldMineSystem(deps: GoldMineDeps) {
+  const GOLD_MINE_VISUAL_SCALE = 2;
   const visual = new Container();
   visual.position.set(GOLD_MINE_CONFIG.center.x, GOLD_MINE_CONFIG.center.y);
   visual.label = "gold-mine";
@@ -136,9 +137,9 @@ export function createGoldMineSystem(deps: GoldMineDeps) {
       coinEggsProduced,
     });
     setState("EXHAUSTED");
-    // Completion immediately makes the mine eligible to respawn elsewhere.
-    // The player leaving the area must not interrupt a started run.
-    cooldownRemaining = 0;
+    // After the mine disappears, keep it off the map for the configured
+    // respawn delay before placing it in another upper-region location.
+    cooldownRemaining = GOLD_MINE_CONFIG.cooldown;
     readyToRespawn = true;
   }
 
@@ -263,8 +264,8 @@ export function createGoldMineSystem(deps: GoldMineDeps) {
         : 0;
     visual.scale.set(
       state === "DESPAWNING"
-        ? pulse * (1 - despawnProgress * 0.88)
-        : pulse,
+        ? GOLD_MINE_VISUAL_SCALE * pulse * (1 - despawnProgress * 0.88)
+        : GOLD_MINE_VISUAL_SCALE * pulse,
     );
     visual.alpha =
       state === "RECHARGING"

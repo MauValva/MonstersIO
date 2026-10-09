@@ -129,7 +129,7 @@ export const GOLD_MINE_CONFIG = {
   activeRadius: 310,
   gracePeriod: 2.5,
   abandonCooldown: 24,
-  cooldown: 90,
+  cooldown: 30,
   despawnDuration: 0.5,
   respawnMinDistance: 850,
   payoutBaseRadius: 120,
