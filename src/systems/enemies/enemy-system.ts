@@ -1,6 +1,14 @@
 import { Container, Graphics, Sprite, Texture } from "pixi.js";
 import { ENEMY_EGG_CAPACITY, PLAYABLE_BOUNDS, FOLLOW_DISTANCE } from "../../config/game-config";
 import type { Point } from "../../game/types";
+import type { WorldRivalLayout } from "../../levels/world-level-design";
+
+const CLOUD_SIZE_MULTIPLIER = 1.15;
+const ENEMY_ART_SIZE_MULTIPLIER = 1.25;
+const NEST_ART_SIZE_MULTIPLIER = 1.15;
+const ENEMY_CLOUD_Y = 6;
+const ENEMY_WITH_CLOUD_Y = -36;
+const ENEMY_WITHOUT_CLOUD_Y = -12;
 
 export type Enemy = {
   container: Container;
@@ -54,6 +62,16 @@ export type EnemySystemDependencies = {
   onRedIntroSteal: () => void;
   onEnemyCollectedEgg: () => void;
   onPlayerCarriedCountChanged: (count: number) => void;
+  getRivalLayout?: () => WorldRivalLayout;
+  getRivalVisuals?: () => EnemyVisualSet;
+};
+
+export type EnemyVisualSet = {
+  enemyFrames: Texture[];
+  enemyNestFrames: Texture[];
+  preserveAspectRatio?: boolean;
+  hideCloud?: boolean;
+  cloudTextures?: readonly (Texture | null)[];
 };
 
 export function createEnemySystem(deps: EnemySystemDependencies) {
@@ -64,23 +82,43 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
     return (data.type === "NORMAL" || data.type === "COIN") && data.source !== "FUGITIVE";
   };
 
-  function createEnemyBase(position: Point, color: number, artTexture: Texture) {
+  function setNestArtSize(nestArt: Sprite, preserveAspectRatio: boolean) {
+    if (!preserveAspectRatio) {
+      nestArt.scale.set(
+        (887 * 0.26 * NEST_ART_SIZE_MULTIPLIER) / nestArt.texture.width,
+        (887 * 0.26 * NEST_ART_SIZE_MULTIPLIER) / nestArt.texture.height,
+      );
+      return;
+    }
+    const maxSize = 887 * 0.26 * NEST_ART_SIZE_MULTIPLIER;
+    const scale = Math.min(maxSize / Math.max(1, nestArt.texture.width), maxSize / Math.max(1, nestArt.texture.height));
+    nestArt.scale.set(scale);
+  }
+
+  function setEnemyArtSize(art: Sprite, preserveAspectRatio: boolean) {
+    if (!preserveAspectRatio) {
+      art.width = 112 * ENEMY_ART_SIZE_MULTIPLIER;
+      art.height = 112 * ENEMY_ART_SIZE_MULTIPLIER;
+      return;
+    }
+    const maxSize = 112 * ENEMY_ART_SIZE_MULTIPLIER;
+    const scale = Math.min(maxSize / Math.max(1, art.texture.width), maxSize / Math.max(1, art.texture.height));
+    art.scale.set(scale);
+  }
+
+  function createEnemyBase(position: Point, artTexture: Texture, preserveAspectRatio: boolean) {
     const enemyBase = new Container();
     enemyBase.position.set(position.x, position.y);
     enemyBase.visible = false;
     const nestArt = new Sprite(artTexture);
     nestArt.anchor.set(0.5);
-    nestArt.scale.set((887 * 0.26) / artTexture.width, (887 * 0.26) / artTexture.height);
+    setNestArtSize(nestArt, preserveAspectRatio);
     enemyBase.addChild(nestArt);
-    const baseLabel = deps.label("RIVAL NEST", 13, color);
-    baseLabel.anchor.set(0.5);
-    baseLabel.position.set(0, 62);
-    enemyBase.addChild(baseLabel);
     deps.world.addChild(enemyBase);
     return enemyBase;
   }
 
-  function createEnemy(position: Point, color: number, homeBase: Container, artTexture: Texture): Enemy {
+  function createEnemy(position: Point, color: number, homeBase: Container, artTexture: Texture, preserveAspectRatio: boolean, hideCloud: boolean, cloudTexture: Texture): Enemy {
     const container = new Container();
     container.position.set(position.x, position.y);
     const body = new Graphics()
@@ -93,17 +131,17 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
       .fill(0x18263b)
       .ellipse(13, -7, 6, 10)
       .fill(0x18263b);
-    const cloud = new Sprite(deps.playerCloudTexture);
+    const cloud = new Sprite(cloudTexture);
     cloud.anchor.set(0.5);
-    cloud.position.set(0, 48);
-    cloud.width = 124;
-    cloud.height = 62;
+    cloud.position.set(0, ENEMY_CLOUD_Y);
+    cloud.width = 124 * CLOUD_SIZE_MULTIPLIER;
+    cloud.height = 62 * CLOUD_SIZE_MULTIPLIER;
     cloud.tint = color === 0xff6f78 ? 0xff9c9c : 0xd7b8ff;
+    cloud.visible = !hideCloud;
     const art = new Sprite(artTexture);
     art.anchor.set(0.5);
-    art.position.set(0, -12);
-    art.width = 112;
-    art.height = 112;
+    art.position.set(0, cloud.visible ? ENEMY_WITH_CLOUD_Y : ENEMY_WITHOUT_CLOUD_Y);
+    setEnemyArtSize(art, preserveAspectRatio);
     body.visible = false;
     eyes.visible = false;
     container.addChild(cloud, art, body, eyes);
@@ -115,15 +153,56 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
     };
   }
 
-  const enemyBases = [
-    createEnemyBase({ x: 2200, y: 850 }, 0xff6f78, deps.enemyNestFrames[0]),
-    createEnemyBase({ x: 4700, y: -1500 }, 0x9c7dff, deps.enemyNestFrames[1]),
-  ];
-  const enemies: Enemy[] = [
-    createEnemy({ x: 2200, y: 850 }, 0xff6f78, enemyBases[0], deps.enemyFrames[0]),
-    createEnemy({ x: 4400, y: -1200 }, 0x9c7dff, enemyBases[1], deps.enemyFrames[1]),
-  ];
+  const rivalLayout = deps.getRivalLayout?.() ?? {
+    bases: [{ x: 2200, y: 850 }, { x: 4700, y: -1500 }],
+    enemies: [{ x: 2200, y: 850 }, { x: 4400, y: -1200 }],
+  };
+  const initialVisuals: EnemyVisualSet = deps.getRivalVisuals?.() ?? {
+    enemyFrames: deps.enemyFrames,
+    enemyNestFrames: deps.enemyNestFrames,
+    preserveAspectRatio: false,
+  };
+  const enemyBases = rivalLayout.bases.map((position, index) =>
+    createEnemyBase(position, initialVisuals.enemyNestFrames[index % initialVisuals.enemyNestFrames.length], Boolean(initialVisuals.preserveAspectRatio)),
+  );
+  const enemies: Enemy[] = rivalLayout.enemies.map((position, index) =>
+    createEnemy(
+      position,
+      index === 0 ? 0xff6f78 : 0x9c7dff,
+      enemyBases[Math.min(index, enemyBases.length - 1)],
+      initialVisuals.enemyFrames[index % initialVisuals.enemyFrames.length],
+      Boolean(initialVisuals.preserveAspectRatio),
+      initialVisuals.cloudTextures
+        ? Boolean(initialVisuals.cloudTextures[index])
+        : !Boolean(initialVisuals.hideCloud),
+      initialVisuals.cloudTextures?.[index] ?? deps.playerCloudTexture,
+    ),
+  );
   const enemyDepositAnimations: EnemyDepositAnimation[] = [];
+
+  function updateVisuals(visuals: EnemyVisualSet) {
+    const preserveAspectRatio = Boolean(visuals.preserveAspectRatio);
+    for (let i = 0; i < enemies.length; i += 1) {
+      const enemy = enemies[i];
+      enemy.art.texture = visuals.enemyFrames[i % visuals.enemyFrames.length];
+      setEnemyArtSize(enemy.art, preserveAspectRatio);
+      if (visuals.cloudTextures) {
+        const cloudTexture = visuals.cloudTextures[i] ?? deps.playerCloudTexture;
+        enemy.cloud.texture = cloudTexture;
+        enemy.cloud.visible = Boolean(visuals.cloudTextures[i]);
+      } else {
+        enemy.cloud.texture = deps.playerCloudTexture;
+        enemy.cloud.visible = !Boolean(visuals.hideCloud);
+      }
+      enemy.cloud.y = ENEMY_CLOUD_Y;
+      enemy.art.y = enemy.cloud.visible ? ENEMY_WITH_CLOUD_Y : ENEMY_WITHOUT_CLOUD_Y;
+      const nestArt = enemyBases[i].children.find((child) => child instanceof Sprite) as Sprite | undefined;
+      if (nestArt) {
+        nestArt.texture = visuals.enemyNestFrames[i % visuals.enemyNestFrames.length];
+        setNestArtSize(nestArt, preserveAspectRatio);
+      }
+    }
+  }
 
   function updateVisibility(rivalsActive: boolean) {
     for (let i = 0; i < enemies.length; i += 1) {
@@ -325,6 +404,46 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
     }
   }
 
+  function clear() {
+    const pendingEggs = new Set<Container>();
+    for (const enemy of enemies) {
+      for (const egg of enemy.eggs) pendingEggs.add(egg);
+      enemy.eggs.length = 0;
+      enemy.target = null;
+      enemy.interestTarget = null;
+      enemy.depositing = false;
+      enemy.container.visible = false;
+    }
+    for (const animation of enemyDepositAnimations) {
+      for (const egg of animation.eggs) pendingEggs.add(egg);
+    }
+    enemyDepositAnimations.length = 0;
+    for (const egg of pendingEggs) deps.eggSystem.releaseEgg(egg);
+    for (const base of enemyBases) base.visible = false;
+  }
+
+  function resetForScene(layout = deps.getRivalLayout?.() ?? rivalLayout) {
+    clear();
+    updateVisuals(deps.getRivalVisuals?.() ?? {
+      enemyFrames: deps.enemyFrames,
+      enemyNestFrames: deps.enemyNestFrames,
+      preserveAspectRatio: false,
+    });
+    for (let i = 0; i < enemyBases.length; i += 1) {
+      const position = layout.bases[i] ?? layout.bases[layout.bases.length - 1];
+      if (!position) continue;
+      enemyBases[i].position.set(position.x, position.y);
+    }
+    for (let i = 0; i < enemies.length; i += 1) {
+      const position = layout.enemies[i] ?? layout.enemies[layout.enemies.length - 1];
+      if (!position) continue;
+      enemies[i].container.position.set(position.x, position.y);
+      enemies[i].homeBase = enemyBases[Math.min(i, enemyBases.length - 1)];
+      enemies[i].dazedUntil = 0;
+      enemies[i].collected = 0;
+    }
+  }
+
   return {
     enemies,
     enemyBases,
@@ -333,5 +452,7 @@ export function createEnemySystem(deps: EnemySystemDependencies) {
     resolveStealing,
     updateDeposits,
     refreshVisualScales,
+    clear,
+    resetForScene,
   };
 }

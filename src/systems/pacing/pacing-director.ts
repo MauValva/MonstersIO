@@ -132,7 +132,7 @@ const reasonPriority: Record<PacingReason, number> = {
 };
 
 export function createPacingDirector(deps: PacingDirectorDependencies) {
-  const config = { ...DEFAULT_PACING_DIRECTOR_CONFIG, ...deps.config };
+  let config = { ...DEFAULT_PACING_DIRECTOR_CONFIG, ...deps.config };
   let evaluationElapsed = config.evaluationInterval;
   let now = 0;
   let activeOpportunity: (PacingDecision & { expiresAt: number }) | null = null;
@@ -456,10 +456,34 @@ export function createPacingDirector(deps: PacingDirectorDependencies) {
     };
   }
 
+  function reset(nextConfig?: Partial<PacingDirectorConfig>) {
+    if (nextConfig) config = { ...DEFAULT_PACING_DIRECTOR_CONFIG, ...nextConfig };
+    evaluationElapsed = config.evaluationInterval;
+    now = 0;
+    activeOpportunity = null;
+    pendingReasons = new Set<PacingReason>();
+    recentOpportunities = [];
+    lastState = null;
+    lastDecision = null;
+    noOpportunityElapsed = 0;
+    surpriseReadiness = 0;
+    timeSinceSurprise = Number.POSITIVE_INFINITY;
+    recoveryRemaining = 0;
+    highIntensityCooldownRemaining = 0;
+    guaranteedCount = 0;
+    surpriseCount = 0;
+    highIntensityEvents = 0;
+    longestDryPeriod = 0;
+    rewardHistory = [];
+    lastCandidateScores = [];
+    deliveryRetryRemaining = 0;
+  }
+
   return {
     request,
     update,
     getDebugState,
+    reset,
     recordReward: (type: OpportunityType, channel: RewardChannel, intensity: RewardIntensity = intensityOf(type)) => {
       rememberReward({ type, reason: "DEAD_MOMENT", targetRegion: "-", intensity, category: categoryOf(type) }, channel);
     },

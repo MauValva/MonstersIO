@@ -11,8 +11,10 @@ export type ZoneRuntime = {
   lastUsedAt: number;
 };
 
-export function createZoneRuntime(): Map<string, ZoneRuntime> {
-  return new Map(OPPORTUNITY_SPAWN_ZONES.map((zone) => [zone.id, {
+export function createZoneRuntime(
+  zones: readonly OpportunitySpawnZone[] = OPPORTUNITY_SPAWN_ZONES,
+): Map<string, ZoneRuntime> {
+  return new Map(zones.map((zone) => [zone.id, {
     reservedUntil: 0,
     cooldownUntil: 0,
     lastUsedAt: -Infinity,
@@ -28,8 +30,9 @@ export function getAvailableZones(
   type: OpportunityTypeId,
   now: number,
   runtime: Map<string, ZoneRuntime>,
+  zones: readonly OpportunitySpawnZone[] = OPPORTUNITY_SPAWN_ZONES,
 ) {
-  return OPPORTUNITY_SPAWN_ZONES.filter((zone) => {
+  return zones.filter((zone) => {
     const state = runtime.get(zone.id);
     return zone.allowedOpportunityTypes.includes(type) &&
       state !== undefined && state.reservedUntil <= now && state.cooldownUntil <= now;

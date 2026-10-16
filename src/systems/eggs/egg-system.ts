@@ -1,5 +1,6 @@
 import { Container, Sprite, Texture } from "pixi.js";
 import { BUSH_STACK_CONFIG, EGG_SPAWN_CONFIG, PLAYABLE_BOUNDS, getStageVisualScale } from "../../config/game-config";
+import type { EggSpawnZone } from "../../config/game-config";
 import type { Point } from "../../game/types";
 import type { Bush } from "../../world/world-scene";
 
@@ -28,10 +29,14 @@ export type EggSystemDependencies = {
   coinTexture?: Texture;
   eggResolutionScale: number;
   getStageIndex: () => number;
+  getVisualScale?: () => number;
   getPlayerPosition: () => Point;
   getNestPosition: () => Point;
   getCarriedEggScale: () => number;
   getCarriedEggGap: () => number;
+  getSpawnZones?: () => readonly EggSpawnZone[];
+  getActiveTarget?: () => number;
+  getWaterWorldActive?: () => boolean;
 };
 
 export function createEggSystem(deps: EggSystemDependencies) {
@@ -50,10 +55,13 @@ export function createEggSystem(deps: EggSystemDependencies) {
   let bushReleaseOrigin: Point | null = null;
   let eggSerial = 0;
 
+  // Eggs use the local evolution curve shared by both worlds. The player
+  // artwork has a separate world-specific scale, but it must not affect eggs.
+  const getEggStageScale = () => getStageVisualScale(deps.getStageIndex());
   const getEggWorldSpriteScale = () =>
     0.19 * deps.eggResolutionScale * Math.min(
       1.22,
-      1 + (getStageVisualScale(deps.getStageIndex()) - 1) * 0.42,
+      1 + (getEggStageScale() - 1) * 0.42,
     );
   const getCarriedEggDistance = (index: number) =>
     deps.getCarriedEggGap() + 28 + deps.getCarriedEggGap() * index;
@@ -65,7 +73,7 @@ export function createEggSystem(deps: EggSystemDependencies) {
     if (data?.type === "COIN" && deps.coinTexture) {
       const stageScale = Math.min(
         1.22,
-        1 + (getStageVisualScale(deps.getStageIndex()) - 1) * 0.42,
+        1 + (getEggStageScale() - 1) * 0.42,
       );
       sprite.width = 66 * stageScale;
       sprite.height = 82 * stageScale;
@@ -104,19 +112,10 @@ export function createEggSystem(deps: EggSystemDependencies) {
     eggSprite.position.set(0);
     eggSprite.rotation = 0;
     eggSprite.anchor.set(0.5);
-    if (nextData.type === "COIN" && deps.coinTexture) {
-      const stageScale = 1 + (getStageVisualScale(stageIndex) - 1) * 0.42;
-      eggSprite.width = 66 * stageScale;
-      eggSprite.height = 82 * stageScale;
-    } else {
-      eggSprite.scale.set(
-        0.19 * deps.eggResolutionScale *
-          (1 + (getStageVisualScale(stageIndex) - 1) * 0.42),
-      );
-    }
     if (eggSprite.parent !== egg) egg.addChild(eggSprite);
     eggData.set(egg, nextData);
     eggSprite.tint = 0xffffff;
+    setEggWorldSpriteScale(egg);
     egg.scale.set(0.12);
     deps.eggLayer.addChild(egg);
     eggs.push(egg);
@@ -136,8 +135,11 @@ export function createEggSystem(deps: EggSystemDependencies) {
     for (let i = eggHideAnimations.length - 1; i >= 0; i -= 1) {
       if (eggHideAnimations[i].egg === egg) eggHideAnimations.splice(i, 1);
     }
-    if (eggPool.length < EGG_SPAWN_CONFIG.activeTarget) eggPool.push(egg);
-    else egg.destroy({ children: true });
+    if (!egg.destroyed && eggPool.length < EGG_SPAWN_CONFIG.activeTarget) {
+      eggPool.push(egg);
+    } else if (!egg.destroyed) {
+      egg.destroy({ children: true });
+    }
   }
 
   function getActiveWorldEggs() {
@@ -152,7 +154,8 @@ export function createEggSystem(deps: EggSystemDependencies) {
 
   function spawnDirectorEgg(bushes: Bush[]) {
     const activeEggs = getActiveWorldEggs();
-    const zone = [...EGG_SPAWN_CONFIG.zones]
+    const spawnZones = deps.getSpawnZones?.() ?? EGG_SPAWN_CONFIG.zones;
+    const zone = [...spawnZones]
       .sort(
         (a, b) =>
           activeEggs.filter((egg) => b.bounds.left <= egg.x && egg.x <= b.bounds.right && b.bounds.top <= egg.y && egg.y <= b.bounds.bottom).length -
@@ -212,6 +215,25 @@ export function createEggSystem(deps: EggSystemDependencies) {
 
   function takeAllCarriedEggs() {
     return takeCarriedEggs();
+  }
+
+  function clear() {
+    const ownedEggs = [...new Set([...eggs, ...carriedEggs])];
+    carriedEggs.length = 0;
+    for (const egg of ownedEggs) releaseEgg(egg);
+    // A world transition must not carry pooled display objects into the next
+    // Scene. The previous scene may already have destroyed one of them while
+    // tearing down its scene-owned containers.
+    for (const egg of eggPool.splice(0)) {
+      if (!egg.destroyed) egg.destroy({ children: true });
+    }
+    eggHideAnimations.length = 0;
+    eggsInHideAnimation.clear();
+    bushCompactTargets.clear();
+    bushLayoutState = "TRAIL";
+    bushReleaseDistance = 0;
+    bushReleasedCount = 0;
+    bushReleaseOrigin = null;
   }
 
   function updateWorldEggMotion(dt: number, time: number) {
@@ -353,7 +375,9 @@ export function createEggSystem(deps: EggSystemDependencies) {
   }
 
   return {
-    activeTarget: EGG_SPAWN_CONFIG.activeTarget,
+    get activeTarget() {
+      return deps.getActiveTarget?.() ?? EGG_SPAWN_CONFIG.activeTarget;
+    },
     eggs,
     carriedEggs,
     eggHideAnimations,
@@ -367,6 +391,7 @@ export function createEggSystem(deps: EggSystemDependencies) {
     addCarriedEgg,
     takeCarriedEggs,
     takeAllCarriedEggs,
+    clear,
     updateWorldEggMotion,
     startBushHideAnimation,
     updateCarriedEggBushAnimations,

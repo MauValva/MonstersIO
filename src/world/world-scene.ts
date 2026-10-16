@@ -1,5 +1,6 @@
 import { Container, Rectangle, Sprite, TilingSprite, Texture } from "pixi.js";
 import { PLAYABLE_BOUNDS, PLANT_POSITIONS, WORLD } from "../config/game-config";
+import type { Point } from "../game/types";
 
 export type Bush = {
   sprite: Sprite;
@@ -9,6 +10,40 @@ export type Bush = {
   height: number;
   flipX: number;
 };
+
+const BUSH_SIZE_MULTIPLIER = 1.15;
+
+export function createBushes(
+  obstacles: Container,
+  plantTexture: Texture,
+  positions: readonly Point[],
+  preserveAspectRatio = false,
+) {
+  const bushes: Bush[] = [];
+  for (const position of positions) {
+    const plant = new Sprite(plantTexture);
+    const sizeVariation = 0.82 + Math.random() * 0.36;
+    plant.anchor.set(0.5, 0.88);
+    plant.position.set(position.x, position.y);
+    const baseWidth = (150 + Math.random() * 45) * sizeVariation * BUSH_SIZE_MULTIPLIER;
+    const baseHeight = (140 + Math.random() * 55) * sizeVariation * BUSH_SIZE_MULTIPLIER;
+    const flipX = Math.random() < 0.5 ? 1 : -1;
+    if (preserveAspectRatio) {
+      const fitScale = Math.min(
+        baseWidth / Math.max(1, plantTexture.width),
+        baseHeight / Math.max(1, plantTexture.height),
+      );
+      plant.scale.set(fitScale);
+    } else {
+      plant.width = baseWidth;
+      plant.height = baseHeight;
+    }
+    plant.scale.x *= flipX;
+    obstacles.addChild(plant);
+    bushes.push({ sprite: plant, x: position.x, y: position.y, width: plant.width, height: plant.height, flipX });
+  }
+  return bushes;
+}
 
 export function createWorldScene(
   world: Container,
@@ -122,7 +157,7 @@ export function createWorldScene(
 
   // Corner pass: keep the artwork orientation unchanged. Mirror only the
   // stones on the left side so they face the same way as the right side.
-  const edgeStoneScale = mixedTileScale;
+  const edgeStoneScale = mixedTileScale * 2;
   const addEdgeStone = (x: number, y: number, mirrorX = false) => {
     const edgeStone = new Sprite(edgeStoneTexture);
     edgeStone.anchor.set(0.5);
@@ -138,20 +173,6 @@ export function createWorldScene(
 
   const obstacles = new Container();
   world.addChild(obstacles);
-  const bushes: Bush[] = [];
-  for (const position of PLANT_POSITIONS) {
-    const plant = new Sprite(plantTexture);
-    const sizeVariation = 0.82 + Math.random() * 0.36;
-    plant.anchor.set(0.5, 0.88);
-    plant.position.set(position.x, position.y);
-    const baseWidth = (150 + Math.random() * 45) * sizeVariation;
-    const baseHeight = (140 + Math.random() * 55) * sizeVariation;
-    const flipX = Math.random() < 0.5 ? 1 : -1;
-    plant.width = baseWidth;
-    plant.height = baseHeight;
-    plant.scale.x *= flipX;
-    obstacles.addChild(plant);
-    bushes.push({ sprite: plant, x: position.x, y: position.y, width: plant.width, height: plant.height, flipX });
-  }
+  const bushes = createBushes(obstacles, plantTexture, PLANT_POSITIONS);
   return { obstacles, bushes };
 }

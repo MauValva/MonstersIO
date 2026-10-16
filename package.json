@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build --base ./",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:architecture": "node scripts/architecture-checks.mjs",
+    "test:egg-transition": "node scripts/verify-egg-transition.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.14.0"

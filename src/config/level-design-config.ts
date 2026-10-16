@@ -6,7 +6,7 @@ export type LogicalRegion = "TL" | "TC" | "TR" | "ML" | "MC" | "MR" | "BL" | "BC
 export const LEVEL_DESIGN_CONFIG = {
   powerUpRegions: ["TL", "TC", "TR", "ML", "MR", "BL", "BR"] as LogicalRegion[],
   fugitiveRegions: ["ML", "MC", "MR"] as LogicalRegion[],
-  goldMineRegions: ["TL", "TC", "TR"] as LogicalRegion[],
+  goldMineRegions: ["TL", "TR", "BL", "BR"] as LogicalRegion[],
   contextualPowerUp: {
     minimumCarriedEggs: 5,
     minimumDelay: 1.2,

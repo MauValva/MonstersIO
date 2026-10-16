@@ -1,15 +1,35 @@
 import "./style.css";
 import { poki } from "./platform/poki";
-import { GAME_ASSETS } from "./assets";
+import { GAME_ASSETS, WATER_WORLD_EVOLUTION_ASSETS } from "./assets";
+import { createSceneAssetRegistry } from "./assets/scene-asset-registry";
+import { SHARED_ASSET_MANIFEST } from "./assets/shared-assets";
+import { GRASS_WORLD_ASSET_MANIFEST } from "./levels/grass/grass-assets";
+import { WATER_WORLD_ASSET_MANIFEST } from "./levels/water/water-assets";
 import { gridTextures } from "./art-textures";
 import { createUpgradeAssetLoader } from "./upgrade-assets";
-import { createWorldScene } from "./world/world-scene";
+import { createLevelManager } from "./levels/level-manager";
+import type { LevelId } from "./levels/level-types";
+import { createGrassWorldLevel } from "./levels/grass/grass-level";
+import { createWaterWorldLevel } from "./levels/water/water-level";
+import { createSceneRuntime } from "./levels/scene-runtime";
+import { createGameSession } from "./game/game-session";
+import { createSceneEventBus, type SceneContext } from "./game/scene-context";
+import { loadGameSave, normalizeWorldSave, saveGameState } from "./game/save-game";
+import {
+  CAMPAIGN_CONFIG,
+  START_IN_WATER_WORLD,
+} from "./config/campaign-config";
+import { CampaignManager } from "./campaign/campaign-manager";
+import {
+  getWorldEvolutionConfig,
+} from "./config/world-evolution-config";
 import { createEggSystem } from "./systems/eggs/egg-system";
 import { createStackVisualController } from "./systems/eggs/stack-visual-controller";
 import { createSessionTelemetry } from "./systems/pacing/session-telemetry";
 import { createEnemySystem } from "./systems/enemies/enemy-system";
 import {
   createPlayerSystem,
+  WATER_WORLD_MONSTER_SCALE,
   type PlayerUpgrades,
 } from "./systems/player/player-system";
 import { createProgressionSystem } from "./systems/progression/progression-system";
@@ -26,22 +46,18 @@ import {
   EGG_SPAWN_CONFIG,
   EGG_PICKUP_FEEDBACK,
   GOLD_MINE_CONFIG,
-  INITIAL_EGG_POSITIONS,
   FUGITIVE_EGG_CONFIG,
   FUGITIVE_RAINBOW_COLORS,
   NEAR_LEVEL_UP_OPPORTUNITY,
   PACING_DIRECTOR_CONFIG,
-  NEST_INTERACTION_RADIUS,
-  POST_FIRST_EVOLUTION_EGG_POSITIONS,
   PLAYABLE_BOUNDS,
   POST_EVOLUTION_OPPORTUNITY,
-  OPPORTUNITY_SPAWN_ZONES,
   RIVALS_START_ACTIVE,
   SESSION_PACING_CONFIG,
   SPECIAL_EGG_CONFIG,
-  STAGES,
   UPGRADE_CONFIG,
   WORLD,
+  getStageVisualScale,
 } from "./config/game-config";
 import {
   createZoneRuntime,
@@ -57,19 +73,23 @@ import { createSpecialEggSystem } from "./systems/powerups/special-egg-system";
 import { createFugitiveEggSystem } from "./systems/events/fugitive-egg-system";
 import { DirectionalArrowTrail } from "./systems/guidance/directional-arrow-trail";
 import {
+  GRASS_WORLD_TUTORIAL_CONFIG,
+  WATER_WORLD_TUTORIAL_CONFIG,
+  type TutorialTarget,
+} from "./config/scene-tutorial-config";
+import { createTutorialSystem } from "./systems/tutorial/tutorial-system";
+import {
   createGoldMineSystem,
   type GoldMinePayout,
   type GoldMineInterest,
 } from "./systems/events/gold-mine-system";
 import {
-  LEVEL_DESIGN_CONFIG,
   getLogicalRegion,
   getLogicalRegionBounds,
   isAllowedLogicalRegion,
 } from "./config/level-design-config";
 import {
   Application,
-  Assets,
   Container,
   Graphics,
   Rectangle,
@@ -83,6 +103,10 @@ import {
 const app = new Application();
 async function bootstrap() {
   const pokiReady = poki.init();
+  // Poki restores the cloud gamesave through localStorage during init.
+  // Wait before reading our save so a stale local value cannot win a race
+  // against the platform restore.
+  await pokiReady;
   await app.init({
     resizeTo: window,
     background: 0x122338,
@@ -93,6 +117,8 @@ async function bootstrap() {
 
   const world = new Container();
   const camera = new Container();
+  const levelLayers = new Container();
+  levelLayers.label = "level-layers";
   camera.addChild(world);
   app.stage.addChild(camera);
 
@@ -119,44 +145,80 @@ async function bootstrap() {
     });
   }
 
-  const [
-    groundAtlas,
-    nestTexture,
-    worldAtlasTexture,
-    enemyNestTexture,
-    playerEvolutionTexture,
-    playerCloudTexture,
-    enemyTexture,
-    eggTexture,
-    plantTexture,
-    edgeStoneTexture,
-    hudTexture,
-    featuresTexture,
-    evolutionUiTexture,
-  ] = await Promise.all(
-    [
-      GAME_ASSETS.ground,
-      GAME_ASSETS.nest,
-      GAME_ASSETS.worldAtlas,
-      GAME_ASSETS.enemyNest,
-      GAME_ASSETS.player,
-      GAME_ASSETS.cloud,
-      GAME_ASSETS.enemy,
-      GAME_ASSETS.eggs,
-      GAME_ASSETS.plant,
-      GAME_ASSETS.edgeStone,
-      GAME_ASSETS.hud,
-      GAME_ASSETS.features,
-      GAME_ASSETS.evolutionUi,
-    ].map((path) => Assets.load<Texture>(path)),
+  const assetRegistry = createSceneAssetRegistry();
+  await assetRegistry.loadManifests([
+    SHARED_ASSET_MANIFEST,
+    GRASS_WORLD_ASSET_MANIFEST,
+    WATER_WORLD_ASSET_MANIFEST,
+  ]);
+  const groundAtlas = assetRegistry.get("grassGroundAtlas");
+  const grassWorldPlayerNestTexture = assetRegistry.get("grassWorldPlayerNest");
+  const grassWorldPlantTexture = assetRegistry.get("grassWorldPlant");
+  const grassWorldEdgeStoneTexture = assetRegistry.get("grassWorldEdgeStone");
+  const grassWorldEnemyBatTexture = assetRegistry.get("grassWorldEnemyBat");
+  const grassWorldEnemyRedTexture = assetRegistry.get("grassWorldEnemyRed");
+  const grassWorldEnemyNest01Texture = assetRegistry.get("grassWorldEnemyNest01");
+  const grassWorldEnemyNest02Texture = assetRegistry.get("grassWorldEnemyNest02");
+  const grassWorldCloudTexture = assetRegistry.get("grassWorldCloud");
+  const waterWorldGroundAtlas = assetRegistry.get("waterWorldGroundAtlas");
+  const waterWorldPlayerNestTexture = assetRegistry.get("waterWorldPlayerNest");
+  const lavaWorldPlaqueTexture = assetRegistry.get("lavaWorldPlaque");
+  const lavaWorldPortalTexture = assetRegistry.get("lavaWorldPortal");
+  const worldAtlasTexture = assetRegistry.get("worldAtlasTexture");
+  const playerEvolutionTexture = assetRegistry.get("playerEvolutionTexture");
+  const eggTexture = assetRegistry.get("eggTexture");
+  const hudTexture = assetRegistry.get("hudTexture");
+  const featuresTexture = assetRegistry.get("featuresTexture");
+  const evolutionUiTexture = assetRegistry.get("evolutionUiTexture");
+  const waterWorldEvolutionTextures = Array.from(
+    { length: WATER_WORLD_EVOLUTION_ASSETS.length },
+    (_, index) => assetRegistry.get(`waterWorldEvolution${String(index + 1).padStart(2, "0")}`),
   );
-  const { obstacles, bushes } = createWorldScene(
-    world,
+  const waterWorldEnemyFrames = [
+    assetRegistry.get("waterWorldEnemyOctopus"),
+    assetRegistry.get("waterWorldEnemyShark"),
+  ];
+  const waterWorldEnemyNestFrames = [
+    assetRegistry.get("waterWorldEnemyNest02"),
+    assetRegistry.get("waterWorldEnemyNest01"),
+  ];
+  const waterWorldEnemyCloudTexture = assetRegistry.get("waterWorldEnemyCloud");
+  const waterWorldHideoutTexture = assetRegistry.get("waterWorldHideout");
+  const savedGame = loadGameSave();
+  const restoredWorld = savedGame ? normalizeWorldSave(savedGame.worlds[savedGame.activeWorld]) : null;
+  const session = createGameSession({
+    campaign: {
+      activeWorld: savedGame?.activeWorld ?? null,
+      completedWorlds: new Set(savedGame?.completedWorlds ?? []),
+      data: {},
+    },
+  });
+  const sceneContext: SceneContext = {
+    session,
+    layers: { world, scenes: levelLayers },
+    services: { camera },
+    events: createSceneEventBus(),
+    resources: {
+      assets: assetRegistry,
+      textures: {
+        groundAtlas,
+        waterWorldGroundAtlas,
+        waterWorldPlayerNestTexture,
+        worldAtlasTexture,
+        playerEvolutionTexture,
+        eggTexture,
+        hudTexture,
+        featuresTexture,
+        evolutionUiTexture,
+      },
+    },
+  };
+  const grassLevel = createGrassWorldLevel({
     groundAtlas,
-    GAME_ASSETS.ground,
-    plantTexture,
-    edgeStoneTexture,
-  );
+    groundPath: GAME_ASSETS.ground,
+    plantTexture: grassWorldPlantTexture,
+    edgeStoneTexture: grassWorldEdgeStoneTexture,
+  }, sceneContext);
   const evolutionColumns = 5;
   const evolutionRows = 2;
     // Keep linear texture filtering from sampling the neighboring evolution
@@ -251,6 +313,11 @@ async function bootstrap() {
   waterWorldMarker.position.set(3100, 4085);
   waterWorldMarker.width = 205;
   waterWorldMarker.height = 179;
+  const waterWorldSceneMarker = new Sprite(lavaWorldPlaqueTexture);
+  waterWorldSceneMarker.anchor.set(0.5);
+  waterWorldSceneMarker.position.set(3100, 4085);
+  waterWorldSceneMarker.width = 205;
+  waterWorldSceneMarker.height = 179;
   const waterWorldCounter = new Text({
     text: "1/10",
     style: new TextStyle({
@@ -270,14 +337,44 @@ async function bootstrap() {
     WATER_WORLD_COUNTER_Y,
   );
   waterWorldCounter.rotation = WATER_WORLD_COUNTER_ROTATION;
-  world.addChild(waterWorldMarker, waterWorldCounter, eggMineMarkers);
-  const enemyFrames = gridTextures(enemyTexture, GAME_ASSETS.enemy, 2, 1);
-  const enemyNestFrames = gridTextures(
-    enemyNestTexture,
-    GAME_ASSETS.enemyNest,
-    2,
-    1,
+  const waterLevel = createWaterWorldLevel({
+    groundAtlas: waterWorldGroundAtlas,
+    groundPath: GAME_ASSETS.waterWorldGround,
+    marker: waterWorldSceneMarker,
+    hideoutTexture: waterWorldHideoutTexture,
+  }, sceneContext);
+  const campaignManager = new CampaignManager(session, CAMPAIGN_CONFIG, [
+      grassLevel.id,
+      waterLevel.id,
+    ]);
+  const levelManager = createLevelManager(
+    [grassLevel, waterLevel],
+    savedGame?.activeWorld ?? (START_IN_WATER_WORLD
+      ? waterLevel.id
+      : campaignManager.getInitialWorldId()),
   );
+  const getActiveLevelDesign = () =>
+    levelManager.active?.design ?? grassLevel.design;
+  const grassWorldLayer = grassLevel.root;
+  const waterWorldScene = waterLevel.root;
+  const { obstacles, bushes } = grassLevel;
+  const waterObstacles = waterLevel.obstacles;
+  const waterBushes = waterLevel.bushes;
+  const getActiveBushes = () =>
+    levelManager.activeId === "water-world" ? waterBushes : bushes;
+  world.addChild(
+    levelLayers,
+    waterWorldMarker,
+    waterWorldCounter,
+    eggMineMarkers,
+  );
+  const initialWaterWorld = levelManager.activeId === "water-world";
+  waterWorldMarker.visible = !initialWaterWorld;
+  // The same counter sits on the Water plaque in Grass and on the Lava
+  // plaque in Water, so it is visible in both active worlds.
+  waterWorldCounter.visible = true;
+  const enemyFrames = [grassWorldEnemyRedTexture, grassWorldEnemyBatTexture];
+  const enemyNestFrames = [grassWorldEnemyNest01Texture, grassWorldEnemyNest02Texture];
   // Geometry-only source: no bitmap download/upload. The whole panel stays
   // hidden until every frame and the station art have been bound atomically.
   const upgradeUiPlaceholder = new TextureSource({ width: 1983, height: 793 });
@@ -355,7 +452,8 @@ async function bootstrap() {
     eggColumns,
     eggRows,
   );
-  // Features.png is a compact art sheet for the special eggs and the mine.
+  // Features.png is a compact art sheet for the special eggs, the Egg Mine
+  // indicator and the gold-egg upgrade object.
   // Keep each crop in one place so gameplay systems only receive the visual
   // that belongs to their placeholder.
   const featureTexture = (
@@ -376,20 +474,25 @@ async function bootstrap() {
     magnet: featureTexture(250, 8, 205, 238),
     orbit: featureTexture(445, 8, 180, 238),
     coin: featureTexture(635, 8, 205, 238),
-    fugitive: featureTexture(835, 0, 189, 245),
+    upgradeBase: featureTexture(770, 190, 120, 145),
+    fugitive: featureTexture(850, 12, 165, 220),
     speed: featureTexture(20, 285, 230, 227),
-    goldMine: featureTexture(245, 225, 575, 287),
+    goldMine: featureTexture(245, 225, 520, 287),
+    eggMineIndicator: featureTexture(820, 315, 204, 197),
   };
+  for (const marker of eggMineMarkerRuntimes) {
+    marker.sprite.texture = featureTextures.eggMineIndicator;
+  }
   // Keep the original 354.8 x 295.666... logical cell at every progression scale.
   const eggResolutionScale = 1774 / eggColumns / eggFrames[0].width;
   const base = new Container();
   // The nest is the safe home at the southern edge of the world. Exploration
   // naturally opens upward from here through the upgrade station.
-  base.position.set(3000, 3500);
-  const nestSprite = new Sprite(nestTexture);
+  base.position.copyFrom(getActiveLevelDesign().nest.position);
+  const nestSprite = new Sprite(grassWorldPlayerNestTexture);
   nestSprite.anchor.set(0.5);
-  nestSprite.position.set(0, -18);
-  nestSprite.scale.set(0.9);
+  nestSprite.position.set(0, 0);
+  nestSprite.scale.set(1.2);
   const basePreview = new Container();
   basePreview.position.set(0, -22);
   const portalActivationFx = new Container();
@@ -464,6 +567,11 @@ async function bootstrap() {
   upgradeBaseSprite.anchor.set(0.5);
   upgradeBaseSprite.width = 172;
   upgradeBaseSprite.height = 175;
+  const setUpgradeBaseTexture = (texture: Texture) => {
+    upgradeBaseSprite.texture = texture;
+    upgradeBaseSprite.width = 172;
+    upgradeBaseSprite.height = 172 * (texture.height / Math.max(1, texture.width));
+  };
   const upgradeStationCore = new Graphics();
   const upgradeStationText = label("UPGRADE", 28, 0xffffff);
   upgradeStationText.anchor.set(0.5);
@@ -507,6 +615,7 @@ async function bootstrap() {
   const pendingNormalPowerUpRespawns = new Set<SpecialEggType>();
   let initialPowerUpsSpawned = false;
   let evolution3FugitiveTriggered = false;
+  let grassLevel8FugitivesTriggered = false;
   let firstGoldMineSpawned = false;
   let eggMineMarkersRetired = false;
   let eggMineMarkersDismissed = false;
@@ -516,13 +625,33 @@ async function bootstrap() {
     | import("./config/level-design-config").LogicalRegion
     | null = null;
   let previousLogicalRegion = getLogicalRegion({ x: 3000, y: 3300 });
-  const progression = createProgressionSystem();
+  const progression = createProgressionSystem(
+    getWorldEvolutionConfig(campaignManager.getCurrentWorldId()),
+    restoredWorld
+      ? {
+          delivered: restoredWorld.delivered,
+          globalDelivered: restoredWorld.globalDelivered,
+          stageIndex: restoredWorld.stageIndex,
+          state: restoredWorld.progressionState,
+        }
+      : undefined,
+  );
+  let restoreSavedSession = Boolean(restoredWorld);
   const powerUpManager = createPowerUpManager();
+  const getWaterWorldEvolutionNumber = () =>
+    Math.min(
+      waterWorldEvolutionTextures.length,
+      Math.max(1, progression.localEvolutionLevel + 1),
+    );
   const playerSystem = createPlayerSystem({
     world,
     evolutionFrames: playerEvolutionFrames,
-    cloudTexture: playerCloudTexture,
+    waterWorldEvolutionFrames: waterWorldEvolutionTextures,
+    cloudTexture: grassWorldCloudTexture,
+    waterWorldCloudTexture: waterWorldEnemyCloudTexture,
     getStageIndex: () => progression.stageIndex,
+    getVisualScale: () => progression.visualScale,
+    getWaterWorldActive: () => levelManager.activeId === "water-world",
     getSpeedMultiplier: () => powerUpManager.getModifiers().speedMultiplier,
     getPickupRangeMultiplier: () =>
       powerUpManager.getModifiers().pickupRangeMultiplier,
@@ -551,11 +680,22 @@ async function bootstrap() {
   let orbitTransitionRemaining = 0;
   let orbitFxStrength = 0;
   let orbitAngle = 0;
-  const getCloudWorldPosition = (): Point => {
+  const getOrbitCenterWorldPosition = (): Point => {
+    if (levelManager.activeId === "water-world") {
+      // Water player artwork is authored at a larger visual scale. Keep the
+      // orbit center at the same local offset used by Grass instead of using
+      // the oversized/invisible Water cloud as the orbit anchor.
+      const localEggScale = getStageVisualScale(progression.stageIndex);
+      const orbitCenterGlobal = player.toGlobal({
+        x: 0,
+        y: playerEvolution.y + 62 * localEggScale,
+      });
+      return world.toLocal(orbitCenterGlobal);
+    }
     const cloudGlobal = player.toGlobal(playerCloud.position);
     return world.toLocal(cloudGlobal);
   };
-  let orbitCenter: Point = getCloudWorldPosition();
+  let orbitCenter: Point = getOrbitCenterWorldPosition();
   const magnetizedEggs = new Map<Container, { delay: number; phase: number }>();
 
   function updateMagnetAttraction(dt: number, time: number) {
@@ -882,9 +1022,12 @@ async function bootstrap() {
     delivered: number;
     unlockedIndex: number;
     shouldEvolve: boolean;
+    portalReady: boolean;
   } | null = null;
   let evolutionDelayRemaining = 0;
   let pendingEvolutionIndex: number | null = null;
+  let pendingPortalTransition = false;
+  let campaignWorldTransitionActivated = false;
   let depositingEggs: Container[] = [];
   let depositEggOrigins: Point[] = [];
   let depositArrivals: boolean[] = [];
@@ -925,13 +1068,30 @@ async function bootstrap() {
   let nestPulseElapsed = 0;
   let nestPulseStrength = 0;
   const getCurrentVisualScale = () => progression.visualScale;
+  const getCurrentEggVisualScale = () =>
+    levelManager.activeId === "water-world"
+      ? getStageVisualScale(progression.stageIndex)
+      : getCurrentVisualScale();
+  const isLateWaterEvolution = () =>
+    levelManager.activeId === "water-world" && progression.stageIndex >= 6;
+  const getActiveEggSpawnZones = () => {
+    const zones = getActiveLevelDesign().eggs.spawnZones;
+    if (!isLateWaterEvolution()) return zones;
+    return zones.map((zone) =>
+      zone.name === "WATER_MC_NEST"
+        ? zone
+        : { ...zone, target: zone.target + 2 },
+    );
+  };
+  const getActiveEggTarget = () =>
+    EGG_SPAWN_CONFIG.activeTarget + (isLateWaterEvolution() ? 16 : 0);
   const getCarriedEggScale = () =>
-    0.67 * Math.min(1.18, 1 + (getCurrentVisualScale() - 1) * 0.38);
-  const getCarriedEggGap = () => Math.max(10, 60 * getCurrentVisualScale());
+    0.67 * Math.min(1.18, 1 + (getCurrentEggVisualScale() - 1) * 0.38);
+  const getCarriedEggGap = () => Math.max(10, 60 * getCurrentEggVisualScale());
   // Manual tuning: distance between carried eggs after the first egg.
   const CARRIED_EGG_STACK_GAP = 44;
   const getCarriedEggStackGap = () =>
-    Math.max(10, CARRIED_EGG_STACK_GAP * getCurrentVisualScale());
+    Math.max(10, CARRIED_EGG_STACK_GAP * getCurrentEggVisualScale());
   function getOrbitSlotPosition(
     index: number,
     total: number,
@@ -939,7 +1099,7 @@ async function bootstrap() {
   ): Point {
     const orbitConfig = SPECIAL_EGG_CONFIG.orbit;
     const baseRadius =
-      45 * getCurrentVisualScale() + 28 + orbitConfig.orbitPadding;
+      45 * getCurrentEggVisualScale() + 28 + orbitConfig.orbitPadding;
     let ring = 0;
     let remaining = total;
     let ringSlot = index;
@@ -979,10 +1139,14 @@ async function bootstrap() {
     coinTexture: featureTextures.coin,
     eggResolutionScale,
     getStageIndex: () => progression.stageIndex,
+    getVisualScale: () => progression.visualScale,
     getPlayerPosition: () => player.position,
     getNestPosition: () => base.position,
     getCarriedEggScale,
     getCarriedEggGap,
+    getSpawnZones: getActiveEggSpawnZones,
+    getActiveTarget: getActiveEggTarget,
+    getWaterWorldActive: () => levelManager.activeId === "water-world",
   });
   const stackVisualController = createStackVisualController();
 
@@ -1052,6 +1216,9 @@ async function bootstrap() {
   }
 
   function updateSessionPacing(dt: number) {
+    if (pendingPortalTransition || progression.state === "TRANSITIONING") {
+      return;
+    }
     sessionPhase = getSessionPhase();
     worldPopulationElapsed += dt;
     visibleOpportunityElapsed += dt;
@@ -1225,6 +1392,7 @@ async function bootstrap() {
     },
     debug: PACING_DIRECTOR_CONFIG.debug,
   });
+  const basePlayerSpeed = 280;
   type OpportunitySpawn = {
     positions: Point[];
     elapsed: number;
@@ -1235,7 +1403,9 @@ async function bootstrap() {
   };
   let postEvolutionOpportunity: OpportunitySpawn | null = null;
   let nearLevelOpportunitySerial = 0;
-  const opportunityZoneRuntime = createZoneRuntime();
+  let opportunityZoneRuntime = createZoneRuntime(
+    getActiveLevelDesign().pacing.opportunityZones,
+  );
   let recentOpportunityZones: string[] = [];
   let selectedOpportunityZoneId: string | null = null;
 
@@ -1255,11 +1425,17 @@ async function bootstrap() {
       "NORMAL_EGG",
       time,
       opportunityZoneRuntime,
+      getActiveLevelDesign().pacing.opportunityZones,
     ).filter((zone) => !recentOpportunityZones.includes(zone.id));
     const candidates =
       available.length > 0
         ? available
-        : getAvailableZones("NORMAL_EGG", time, opportunityZoneRuntime);
+        : getAvailableZones(
+            "NORMAL_EGG",
+            time,
+            opportunityZoneRuntime,
+            getActiveLevelDesign().pacing.opportunityZones,
+          );
     const dx = player.x - previousPlayerPosition.x;
     const dy = player.y - previousPlayerPosition.y;
     const movementLength = Math.hypot(dx, dy);
@@ -1319,7 +1495,7 @@ async function bootstrap() {
       return false;
     if (distance(position, player.position) < minDistance) return false;
     if (distance(position, player.position) > maxDistance) return false;
-    if (distance(position, base.position) < NEST_INTERACTION_RADIUS + 120)
+    if (distance(position, base.position) < getActiveLevelDesign().nest.interactionRadius + 120)
       return false;
     if (
       chosen.some(
@@ -1387,7 +1563,7 @@ async function bootstrap() {
       zoneCandidates.length > 0
         ? zoneCandidates
         : firstEvolution
-          ? POST_FIRST_EVOLUTION_EGG_POSITIONS
+          ? getActiveLevelDesign().eggs.postFirstEvolutionPositions
           : [
               { x: 0, y: -430 },
               { x: -170, y: -550 },
@@ -1406,7 +1582,7 @@ async function bootstrap() {
             }));
     const candidates = firstEvolution
       ? deterministic
-      : deterministic.sort(
+      : [...deterministic].sort(
           (a, b) => distance(a, player.position) - distance(b, player.position),
         );
     const chosen: Point[] = [];
@@ -1492,7 +1668,7 @@ async function bootstrap() {
         intent: decision.targetRegion,
         zoneId: selectedOpportunityZoneId,
         offscreen: positions.every(isOffscreenSafeOpportunityPosition),
-        allowedTypes: OPPORTUNITY_SPAWN_ZONES.find(
+        allowedTypes: getActiveLevelDesign().pacing.opportunityZones.find(
           (zone) => zone.id === selectedOpportunityZoneId,
         )?.allowedOpportunityTypes,
       });
@@ -1742,8 +1918,8 @@ async function bootstrap() {
   function spawnDemonstrationFormation(center: Point, type: SpecialEggType) {
     const formation =
       type === SpecialEggType.Magnet
-        ? LEVEL_DESIGN_CONFIG.formations.magnet
-        : LEVEL_DESIGN_CONFIG.formations.range;
+        ? getActiveLevelDesign().powerUps.formations.magnet
+        : getActiveLevelDesign().powerUps.formations.range;
     for (let i = 0; i < formation.count; i += 1) {
       const angle = (i / formation.count) * Math.PI * 2;
       const position = {
@@ -1767,6 +1943,7 @@ async function bootstrap() {
   }
 
   function spawnNormalPowerUp(type: SpecialEggType, position: Point) {
+    if (!getActiveLevelDesign().powerUps.enabledTypes.includes(type)) return false;
     if (normalPowerUpEntities.has(type)) return false;
     const entity = specialEggSystem.spawn(type, position, {
       opportunityId: `normal-pool-${type.toLowerCase()}-${time.toFixed(2)}`,
@@ -1790,7 +1967,11 @@ async function bootstrap() {
         getLogicalRegion(entity.container.position),
       ),
     );
-    const availableRegions = LEVEL_DESIGN_CONFIG.powerUpRegions.filter(
+    const powerUpDesign = getActiveLevelDesign().powerUps;
+    const allowedRegions =
+      powerUpDesign.allowedRegionsByType?.[type as keyof typeof powerUpDesign.allowedRegionsByType] ??
+      powerUpDesign.allowedRegions;
+    const availableRegions = allowedRegions.filter(
       (region) => !occupiedRegions.has(region),
     );
     const shuffled = [...availableRegions].sort(() => Math.random() - 0.5);
@@ -1813,6 +1994,10 @@ async function bootstrap() {
             (entity) =>
               entity !== normalPowerUpEntities.get(type) &&
               distance(entity.container.position, position) < 260,
+          ) &&
+          distance(base.position, position) >= 360 &&
+          !enemySystem.enemyBases.some(
+            (enemyBase) => distance(enemyBase.position, position) < 360,
           )
         )
           return position;
@@ -1823,13 +2008,9 @@ async function bootstrap() {
 
   function spawnInitialPowerUps() {
     if (initialPowerUpsSpawned) return;
-    const initial: Array<[SpecialEggType, Point]> = [
-      [SpecialEggType.Orbit, { x: 1350, y: -2750 }],
-      [SpecialEggType.Speed, { x: 4750, y: -2750 }],
-      [SpecialEggType.Range, { x: 1350, y: 2700 }],
-      [SpecialEggType.Magnet, { x: 4750, y: 2700 }],
-    ];
-    for (const [type, position] of initial) spawnNormalPowerUp(type, position);
+    for (const placement of getActiveLevelDesign().powerUps.initialPlacements) {
+      spawnNormalPowerUp(placement.type as SpecialEggType, placement.position);
+    }
     initialPowerUpsSpawned = true;
     firstPowerUpDelivered = true;
   }
@@ -1841,6 +2022,25 @@ async function bootstrap() {
       if (spawnNormalPowerUp(type, position))
         pendingNormalPowerUpRespawns.delete(type);
     }
+  }
+
+  let activeLevelDesignId = getActiveLevelDesign().worldId;
+  function syncActiveLevelDesign() {
+    const design = getActiveLevelDesign();
+    if (design.worldId === activeLevelDesignId) return;
+    activeLevelDesignId = design.worldId;
+    opportunityZoneRuntime = createZoneRuntime(design.pacing.opportunityZones);
+    recentOpportunityZones = [];
+    selectedOpportunityZoneId = null;
+    postEvolutionOpportunity = null;
+    pendingNormalPowerUpRespawns.clear();
+    specialEggSystem.clear();
+    normalPowerUpEntities.clear();
+    fugitiveSystem.clear();
+    evolution3FugitiveTriggered = false;
+    grassLevel8FugitivesTriggered = false;
+    initialPowerUpsSpawned = false;
+    spawnInitialPowerUps();
   }
 
   // TEMPORARY QA SHOWCASE: press T to place every action egg, a coin egg,
@@ -1880,6 +2080,7 @@ async function bootstrap() {
     type: SpecialEggType,
     contextual = false,
   ) {
+    if (!getActiveLevelDesign().powerUps.enabledTypes.includes(type)) return false;
     if (
       (!contextual && powerUpManager.getActive(type)) ||
       (!contextual &&
@@ -1898,19 +2099,20 @@ async function bootstrap() {
       opportunityType,
       time,
       opportunityZoneRuntime,
+      getActiveLevelDesign().pacing.opportunityZones,
     ).filter((zone) => {
       const center = {
         x: (zone.bounds.left + zone.bounds.right) * 0.5,
         y: (zone.bounds.top + zone.bounds.bottom) * 0.5,
       };
       return (
-        isAllowedLogicalRegion(center, LEVEL_DESIGN_CONFIG.powerUpRegions) &&
+        isAllowedLogicalRegion(center, getActiveLevelDesign().powerUps.allowedRegions) &&
         (zone.region === decision.targetRegion ||
           decision.reason === "DEAD_MOMENT")
       );
     });
     const toCandidate = (
-      zone: (typeof OPPORTUNITY_SPAWN_ZONES)[number],
+      zone: import("./config/game-config").OpportunitySpawnZone,
       offscreenOnly: boolean,
     ) => {
       const center = {
@@ -1953,6 +2155,7 @@ async function bootstrap() {
       opportunityType,
       time,
       opportunityZoneRuntime,
+      getActiveLevelDesign().pacing.opportunityZones,
     ).filter((zone) => !zones.includes(zone));
     const fallbackCandidates = fallbackZones.map((zone) =>
       toCandidate(zone, false),
@@ -2002,18 +2205,23 @@ async function bootstrap() {
   }
 
   function spawnDirectedFugitive(decision: PacingDecision) {
-    if (fugitiveSystem.active || progression.stageIndex < 2) return false;
+    if (
+      !getActiveLevelDesign().fugitive.enabled ||
+      fugitiveSystem.active ||
+      progression.stageIndex < getActiveLevelDesign().fugitive.firstSpawnLocalEvolution
+    ) return false;
     const zones = getAvailableZones(
       "FUGITIVE_EGG",
       time,
       opportunityZoneRuntime,
+      getActiveLevelDesign().pacing.opportunityZones,
     ).filter((zone) => {
       const center = {
         x: (zone.bounds.left + zone.bounds.right) * 0.5,
         y: (zone.bounds.top + zone.bounds.bottom) * 0.5,
       };
       return (
-        isAllowedLogicalRegion(center, LEVEL_DESIGN_CONFIG.fugitiveRegions) &&
+        isAllowedLogicalRegion(center, getActiveLevelDesign().fugitive.allowedRegions) &&
         (zone.region === decision.targetRegion ||
           decision.reason === "DEAD_MOMENT")
       );
@@ -2068,12 +2276,61 @@ async function bootstrap() {
     return true;
   }
 
+  function getInitialFugitivePosition(): Point {
+    const design = getActiveLevelDesign();
+    if (levelManager.activeId !== "water-world") {
+      return {
+        x: Math.max(
+          PLAYABLE_BOUNDS.left + 120,
+          Math.min(PLAYABLE_BOUNDS.right - 120, player.x + 150),
+        ),
+        y: Math.max(PLAYABLE_BOUNDS.top + 160, player.y - 720),
+      };
+    }
+    const regions =
+      design.fugitive.initialSpawnRegions ?? design.fugitive.allowedRegions;
+    const candidates = regions.map((region) => {
+      const bounds = getLogicalRegionBounds(region);
+      return {
+        x: (bounds.left + bounds.right) * 0.5,
+        y: (bounds.top + bounds.bottom) * 0.5,
+      };
+    });
+    return (
+      candidates.find((position) => isOffscreenSafeOpportunityPosition(position)) ??
+      candidates[0] ?? {
+        x: Math.max(
+          PLAYABLE_BOUNDS.left + 120,
+          Math.min(PLAYABLE_BOUNDS.right - 120, player.x + 150),
+        ),
+        y: Math.max(
+          PLAYABLE_BOUNDS.top + 160,
+          player.y - 720,
+        ),
+      }
+    );
+  }
+
+  function getGrassLevel8FugitivePositions(): Point[] {
+    const nestRegion = getLogicalRegion(getActiveLevelDesign().nest.position);
+    const regions = ["TL", "TC", "TR", "ML", "MC", "MR", "BL", "BC", "BR"] as const;
+    return regions
+      .filter((region) => region !== nestRegion)
+      .map((region) => {
+        const bounds = getLogicalRegionBounds(region);
+        return {
+          x: (bounds.left + bounds.right) * 0.5,
+          y: (bounds.top + bounds.bottom) * 0.5,
+        };
+      });
+  }
+
   function trySpawnContextualPowerUp() {
     if (
       !contextualPowerUpPending ||
-      carried < LEVEL_DESIGN_CONFIG.contextualPowerUp.minimumCarriedEggs ||
+      carried < getActiveLevelDesign().powerUps.contextual.minimumCarriedEggs ||
       time - contextualPowerUpRequestedAt <
-        LEVEL_DESIGN_CONFIG.contextualPowerUp.minimumDelay ||
+        getActiveLevelDesign().powerUps.contextual.minimumDelay ||
       specialEggSystem.entities.some(
         (entity) => !normalPowerUpEntities.has(entity.type),
       ) ||
@@ -2100,7 +2357,9 @@ async function bootstrap() {
     if (delivered) contextualPowerUpPending = null;
   }
   spawnInitialPowerUps();
-  INITIAL_EGG_POSITIONS.forEach((position) => eggSystem.spawnEgg(position, 0));
+  getActiveLevelDesign().eggs.initialPositions.forEach((position) =>
+    eggSystem.spawnEgg(position, 0),
+  );
   const input = { x: 0, y: 0 };
   let gameplayStarted = false;
   let sdkAdPlaying = false;
@@ -2119,7 +2378,7 @@ async function bootstrap() {
     eggSystem,
     enemyFrames,
     enemyNestFrames,
-    playerCloudTexture,
+    playerCloudTexture: grassWorldCloudTexture,
     label,
     getPlayerPosition: () => player.position,
     getTime: () => time,
@@ -2133,7 +2392,7 @@ async function bootstrap() {
           ? {
               position: fugitiveInterest.position,
               strength: 1.1,
-              radius: LEVEL_DESIGN_CONFIG.enemyContest.maximumDistance,
+          radius: getActiveLevelDesign().fugitive.enemyContestMaximumDistance,
               type: "FUGITIVE_JACKPOT" as const,
             }
           : null;
@@ -2173,6 +2432,22 @@ async function bootstrap() {
     onPlayerCarriedCountChanged: (count) => {
       carried = count;
     },
+    getRivalLayout: () => getActiveLevelDesign().rivals,
+    getRivalVisuals: () =>
+      levelManager.activeId === "water-world"
+        ? {
+            enemyFrames: waterWorldEnemyFrames,
+            enemyNestFrames: waterWorldEnemyNestFrames,
+            preserveAspectRatio: true,
+            hideCloud: true,
+            cloudTextures: [null, waterWorldEnemyCloudTexture],
+          }
+        : {
+            enemyFrames,
+            enemyNestFrames,
+            preserveAspectRatio: false,
+            hideCloud: false,
+          },
     onRedIntroSteal: () => {
       if (!enemyTutorialShown) enemyTutorialPending = true;
       if (!redIntroChaseCompleted) {
@@ -2185,21 +2460,28 @@ async function bootstrap() {
   // A vegetação fica na frente dos personagens e dos ovos no mapa.
   // Rival nests belong above the ground, but behind eggs, characters and
   // vegetation. They must not visually cover the gameplay actors.
-  const obstacleLayerIndex = world.getChildIndex(obstacles);
+  // Grass vegetation now lives inside the Grass World layer. Keep the layer
+  // itself above gameplay actors when adjusting the shared world ordering.
+  // The level terrain is always the backmost world layer. Keeping this
+  // container at index 0 prevents later enemy/mine ordering from covering
+  // the player and other gameplay entities when Water World is activated.
+  world.setChildIndex(levelLayers, 0);
+  const obstacleLayerIndex = 1;
   for (const enemyBase of enemySystem.enemyBases) {
     world.setChildIndex(enemyBase, obstacleLayerIndex);
   }
-  world.setChildIndex(obstacles, world.children.length - 1);
+  // Keep the Grass World layer behind gameplay actors: it contains both the
+  // floor and vegetation, so moving the whole layer to the top would let the
+  // opaque ground cover the player, nests and other world entities.
   // Keep the Gold Mine above the ground, but below vegetation and gameplay actors.
   world.setChildIndex(goldMineLayer, obstacleLayerIndex);
+  // Bushes are foreground cover and must render above gameplay actors.
+  world.setChildIndex(obstacles, world.children.length - 1);
+  world.setChildIndex(waterObstacles, world.children.length - 1);
   function refreshProgressionVisuals() {
     const progressionScale = getCurrentVisualScale();
-    const bushScale = Math.min(1.18, 1 + (progressionScale - 1) * 0.2);
-    for (const bush of bushes) {
-      bush.sprite.width = bush.width * bushScale;
-      bush.sprite.height = bush.height * bushScale;
-      bush.sprite.scale.x = bush.flipX * Math.abs(bush.sprite.scale.x);
-    }
+    grassLevel.refreshVisualScale(progressionScale);
+    waterLevel.refreshVisualScale(progressionScale);
     eggSystem.refreshScales();
     enemySystem.refreshVisualScales(progressionScale);
   }
@@ -2222,46 +2504,18 @@ async function bootstrap() {
   redrawPlayer();
 
   function getBushCover(point: Point) {
-    return bushes.reduce((maxCover, bush) => {
-      const bushCenterY = bush.y - bush.height * 0.44;
-      const normalizedX = (point.x - bush.x) / (bush.width * 0.5);
-      const normalizedY = (point.y - bushCenterY) / (bush.height * 0.5);
-      const cover = Math.max(0, 1 - Math.hypot(normalizedX, normalizedY));
-      return Math.max(maxCover, cover);
-    }, 0);
+    return levelManager.activeId === "water-world"
+      ? waterLevel.getCover(point)
+      : grassLevel.getCover(point);
   }
 
   function updateBushHideFeedback(hidden: boolean) {
-    let hidingBush: (typeof bushes)[number] | null = null;
-    if (hidden) {
-      hidingBush = bushes.reduce(
-        (best, bush) => {
-          const bushCenterY = bush.y - bush.height * 0.44;
-          const normalizedX = (player.x - bush.x) / (bush.width * 0.5);
-          const normalizedY = (player.y - bushCenterY) / (bush.height * 0.5);
-          const cover = Math.max(0, 1 - Math.hypot(normalizedX, normalizedY));
-          if (!best) return cover >= 0.5 ? bush : null;
-          const bestCenterY = best.y - best.height * 0.44;
-          const bestCover = Math.max(
-            0,
-            1 -
-              Math.hypot(
-                (player.x - best.x) / (best.width * 0.5),
-                (player.y - bestCenterY) / (best.height * 0.5),
-              ),
-          );
-          return cover > bestCover ? bush : best;
-        },
-        null as (typeof bushes)[number] | null,
-      );
-    }
-    for (const bush of bushes) {
-      bush.sprite.alpha = hidingBush === bush ? 0.42 : 1;
-    }
+    const level = levelManager.activeId === "water-world" ? waterLevel : grassLevel;
+    level.setHideFeedback(player.position, hidden);
   }
 
   function animateCarriedEggsForBush(hiding: boolean) {
-    eggSystem.startBushHideAnimation(player.position, hiding, bushes);
+    eggSystem.startBushHideAnimation(player.position, hiding, getActiveBushes());
   }
 
   function updateCarriedEggBushAnimations(dt: number) {
@@ -2269,7 +2523,7 @@ async function bootstrap() {
   }
 
   let previewState:
-    | { skin: number; delivered: number; evolving: boolean }
+    | { skin: number; delivered: number; evolving: boolean; portal: boolean }
     | undefined;
   // Keep a clearly readable black remainder on every character preview. The
   // last eggs get a small visual boost, but the mask must never reach 100%:
@@ -2280,23 +2534,58 @@ async function bootstrap() {
     if (
       previewState?.skin === progression.stageIndex &&
       previewState.delivered === baseVisualDelivered &&
-      previewState.evolving === evolving
+      previewState.evolving === evolving &&
+      previewState.portal === progression.isPortalActive
     )
       return;
     previewState = {
       skin: progression.stageIndex,
       delivered: baseVisualDelivered,
       evolving,
+      portal: progression.isPortalActive,
     };
-    const nextIndex = Math.min(progression.stageIndex + 1, STAGES.length - 1);
-    const nextStage = STAGES[nextIndex];
-    const isPortalPreview = nextIndex >= playerEvolutionFrames.length;
-    nestSprite.visible = progression.stageIndex < playerEvolutionFrames.length;
+    const stages = progression.stages;
+    const waterWorldActive = levelManager.activeId === "water-world";
+    const isPortalPreview = !waterWorldActive && progression.isPortalActive;
+    const nextIndex = isPortalPreview
+      ? stages.length
+      : Math.min(progression.stageIndex + 1, stages.length - 1);
+    const nextStage = isPortalPreview
+      ? {
+          ...stages[stages.length - 1],
+          threshold: progression.portalEggRequirement ?? stages[stages.length - 1].threshold,
+          scale: getWorldEvolutionConfig("grass-world").portalScale,
+        }
+      : stages[nextIndex];
+    const previewFrameIndex = waterWorldActive
+      ? Math.min(nextIndex, waterWorldEvolutionTextures.length - 1)
+      : Math.min(nextIndex, playerEvolutionFrames.length - 1);
+    nestSprite.visible = !isPortalPreview;
     const previewTexture = isPortalPreview
       ? worldAtlasTextures.portal
-      : playerEvolutionFrames[nextIndex];
+      : waterWorldActive
+        ? waterWorldEvolutionTextures[previewFrameIndex]
+        : playerEvolutionFrames[previewFrameIndex];
+    const nestEvolutionVerticalOffset =
+      waterWorldActive && previewFrameIndex === 1
+        ? 85
+        : waterWorldActive && previewFrameIndex === 2
+          ? 75
+        : waterWorldActive && previewFrameIndex === 3
+          ? 58
+        : waterWorldActive && previewFrameIndex === 4
+          ? 22
+        : waterWorldActive && previewFrameIndex === 5
+          ? 22
+        : waterWorldActive && previewFrameIndex === 6
+          ? 72
+        : !waterWorldActive && [3, 4, 5].includes(previewFrameIndex)
+          ? 12
+          : 0;
     const threshold = nextStage.threshold;
-    const previousThreshold = STAGES[Math.max(0, nextIndex - 1)].threshold;
+    const previousThreshold = isPortalPreview
+      ? stages[stages.length - 1].threshold
+      : stages[Math.max(0, nextIndex - 1)].threshold;
     const progress =
       nextIndex === progression.stageIndex
         ? 0
@@ -2314,7 +2603,7 @@ async function bootstrap() {
     // characters, so its final progress reads better when the fill starts
     // getting the extra push a few eggs earlier.
     const lastEggsBoostWindow = nextIndex === 4 ? 6 : 2;
-    const maskProgress = isPortalPreview && portalActivated
+    const maskProgress = isPortalPreview && progression.isPortalCompleted
       ? 1
       : isCharacterPreview
       ? Math.min(
@@ -2325,8 +2614,7 @@ async function bootstrap() {
               : 0),
         )
       : progress;
-    basePreview.visible =
-      (isPortalPreview && portalActivated) ||
+    basePreview.visible = isPortalPreview ||
       (nextIndex > progression.stageIndex && !evolving);
     const radius = 37 * nextStage.scale;
     basePreviewEvolution.texture = previewTexture;
@@ -2334,13 +2622,41 @@ async function bootstrap() {
     if (isPortalPreview) {
       basePreviewEvolution.position.set(0, -142);
     } else {
-      basePreviewEvolution.position.set(15, -150);
+      basePreviewEvolution.position.set(15, -150 + nestEvolutionVerticalOffset);
     }
     portalProgressText.visible = isPortalPreview;
     portalProgressText.position.copyFrom(basePreviewEvolution.position);
     basePreviewEvolutionColor.position.copyFrom(basePreviewEvolution.position);
-    basePreviewEvolution.width = (isPortalPreview ? 230 : 176) * nextStage.scale;
-    basePreviewEvolution.height = (isPortalPreview ? 203 : 226) * nextStage.scale;
+    const nestMonsterScale = waterWorldActive ? WATER_WORLD_MONSTER_SCALE : 1;
+    const waterPreviewEvolutionScale =
+      waterWorldActive && previewFrameIndex === 1
+        ? 0.825
+        : waterWorldActive && previewFrameIndex === 2
+          ? 0.85
+          : 1;
+    const preserveGrassEvolutionAspect =
+      !waterWorldActive && !isPortalPreview && previewFrameIndex === 5;
+    const targetPreviewWidth =
+      (isPortalPreview ? 230 : 176) * nextStage.scale * nestMonsterScale * waterPreviewEvolutionScale;
+    const targetPreviewHeight =
+      (isPortalPreview ? 203 : 226) * nextStage.scale * nestMonsterScale * waterPreviewEvolutionScale;
+    if (preserveGrassEvolutionAspect || (waterWorldActive && !isPortalPreview)) {
+      const textureAspect = previewTexture.width / Math.max(1, previewTexture.height);
+      const boxAspect = targetPreviewWidth / targetPreviewHeight;
+      if (preserveGrassEvolutionAspect) {
+        basePreviewEvolution.height = targetPreviewHeight;
+        basePreviewEvolution.width = targetPreviewHeight * textureAspect;
+      } else if (textureAspect >= boxAspect) {
+        basePreviewEvolution.width = targetPreviewWidth;
+        basePreviewEvolution.height = targetPreviewWidth / textureAspect;
+      } else {
+        basePreviewEvolution.height = targetPreviewHeight;
+        basePreviewEvolution.width = targetPreviewHeight * textureAspect;
+      }
+    } else {
+      basePreviewEvolution.width = targetPreviewWidth;
+      basePreviewEvolution.height = targetPreviewHeight;
+    }
     basePreviewEvolutionColor.width = basePreviewEvolution.width;
     basePreviewEvolutionColor.height = basePreviewEvolution.height;
     basePreviewBody.clear();
@@ -2363,10 +2679,14 @@ async function bootstrap() {
     const frameArtIndex = Math.min(nextIndex, evolutionArtTopFractions.length - 1);
     const previewArtTop = isPortalPreview
       ? basePreviewEvolutionColor.y - previewHeight / 2
-      : basePreviewEvolutionColor.y - previewHeight / 2 + previewHeight * evolutionArtTopFractions[frameArtIndex];
+      : waterWorldActive
+        ? basePreviewEvolutionColor.y - previewHeight / 2
+        : basePreviewEvolutionColor.y - previewHeight / 2 + previewHeight * evolutionArtTopFractions[frameArtIndex];
     const previewArtBottom = isPortalPreview
       ? basePreviewEvolutionColor.y + previewHeight / 2
-      : basePreviewEvolutionColor.y + previewHeight / 2 - previewHeight * evolutionArtBottomFractions[frameArtIndex];
+      : waterWorldActive
+        ? basePreviewEvolutionColor.y + previewHeight / 2
+        : basePreviewEvolutionColor.y + previewHeight / 2 - previewHeight * evolutionArtBottomFractions[frameArtIndex];
     const previewArtHeight = previewArtBottom - previewArtTop;
     basePreviewFillMask
       .clear()
@@ -2384,10 +2704,10 @@ async function bootstrap() {
       const end = ((i + 1) / segments) * Math.PI * 2;
       nestInteractionIndicator
         .moveTo(
-          Math.cos(start) * NEST_INTERACTION_RADIUS,
-          Math.sin(start) * NEST_INTERACTION_RADIUS,
+          Math.cos(start) * getActiveLevelDesign().nest.interactionRadius,
+          Math.sin(start) * getActiveLevelDesign().nest.interactionRadius,
         )
-        .arc(0, 0, NEST_INTERACTION_RADIUS, start, end)
+        .arc(0, 0, getActiveLevelDesign().nest.interactionRadius, start, end)
         .stroke({ color: 0xfff2a6, alpha: 0.42, width: 4 });
     }
   }
@@ -2744,13 +3064,13 @@ async function bootstrap() {
     }
     if (upgradeArtPromise) return upgradeArtPromise;
     upgradeArtPromise = loadUpgradeAssets()
-      .then(({ ui: loadedUpgradeUi, base }) => {
+      .then(({ ui: loadedUpgradeUi }) => {
         for (const frame of upgradeUiFrames) {
           frame.source = loadedUpgradeUi.source;
           frame.update();
         }
         // Sprite retains its explicit 172 x 175 world size on texture replacement.
-        upgradeBaseSprite.texture = base;
+        setUpgradeBaseTexture(featureTextures.upgradeBase);
         upgradeUiPlaceholder.destroy();
         upgradeAssetsReady = true;
         upgradeLoadStatus.visible = false;
@@ -2839,20 +3159,22 @@ async function bootstrap() {
   resizeBootCover();
   window.addEventListener("resize", resizeBootCover);
 
-  type TutorialTarget =
-    | "EGG"
-    | "NEST"
-    | "UPGRADE"
-    | "BUSH"
-    | "ENEMY"
-    | "MAGNET"
-    | "GOLD_MINE"
-    | "WATER_WORLD"
-    | null;
-  let activeTutorialTarget: TutorialTarget = null;
+  const grassTutorialSystem = createTutorialSystem({
+    context: sceneContext,
+    config: GRASS_WORLD_TUTORIAL_CONFIG,
+  });
+  const waterTutorialSystem = createTutorialSystem({
+    context: sceneContext,
+    config: WATER_WORLD_TUTORIAL_CONFIG,
+  });
+  const getActiveTutorialSystem = () =>
+    levelManager.activeId === "water-world"
+      ? waterTutorialSystem
+      : grassTutorialSystem;
+  const getActiveTutorialTarget = () => getActiveTutorialSystem().activeTarget;
   let tutorialEnemy: (typeof enemies)[number] | null = null;
-  const setTutorialTarget = (target: TutorialTarget) => {
-    activeTutorialTarget = target;
+  const setTutorialTarget = (target: TutorialTarget | null) => {
+    getActiveTutorialSystem().setTarget(target);
     tutorialIndicatorLabel.text =
       target === "BUSH"
         ? "HIDE"
@@ -2864,37 +3186,23 @@ async function bootstrap() {
             ? "MAGNET"
             : target === "GOLD_MINE"
               ? "Egg Mine"
-            : target === "WATER_WORLD"
-              ? "Water World"
             : target === "NEST"
               ? ""
               : (target ?? "");
-    tutorialIndicatorLabel.visible = target !== null;
+    tutorialIndicatorLabel.visible = getActiveTutorialSystem().activeTarget !== null;
   };
   const clearTutorialTarget = (target: TutorialTarget) => {
-    if (activeTutorialTarget === target) setTutorialTarget(null);
+    getActiveTutorialSystem().clearTarget(target);
+    tutorialIndicatorLabel.visible = getActiveTutorialSystem().activeTarget !== null;
   };
 
   const getNearestBush = () =>
-    bushes.reduce(
-      (closest, candidate) =>
-        distance(player.position, {
-          x: candidate.x,
-          y: candidate.y - candidate.height * 0.44,
-        }) <
-        distance(player.position, {
-          x: closest.x,
-          y: closest.y - closest.height * 0.44,
-        })
-          ? candidate
-          : closest,
-      bushes[0],
-    );
+    (levelManager.activeId === "water-world" ? waterLevel : grassLevel).getNearestBush(player.position);
 
   function getNearLevelUpState() {
     const carriedForProgress = depositing ? 0 : carried;
     const effectiveProgress = progression.delivered + carriedForProgress;
-    const nextThreshold = progression.getNextThreshold();
+    const nextThreshold = progression.getNextThreshold(effectiveProgress);
     const remainingEggs = Math.max(0, nextThreshold - effectiveProgress);
     const nearbyEggs = eggSystem
       .getActiveWorldEggs()
@@ -2910,7 +3218,7 @@ async function bootstrap() {
         remainingEggs <= NEAR_LEVEL_UP_OPPORTUNITY.maxMissingEggs &&
         !depositing &&
         !evolving &&
-        activeTutorialTarget === null,
+        getActiveTutorialTarget() === null,
       remainingEggs,
       carriedEggs: carried,
       nearbyEggs,
@@ -3036,9 +3344,7 @@ async function bootstrap() {
       rival1: enemies[0].collected,
       rival2: enemies[1].collected,
     };
-    const nextThreshold =
-      STAGES.find((stage) => stage.threshold > displayedDelivered)?.threshold ??
-      STAGES[STAGES.length - 1].threshold;
+    const nextThreshold = progression.getNextThreshold(displayedDelivered);
     progressText.text = `${displayedDelivered} / ${nextThreshold}`;
     portalProgressText.text = progressText.text;
     currencyText.text = String(currency);
@@ -3063,7 +3369,7 @@ async function bootstrap() {
   const opportunityZoneDebug = new Container();
   opportunityZoneDebug.visible = PACING_DIRECTOR_CONFIG.debug;
   world.addChild(opportunityZoneDebug);
-  for (const zone of OPPORTUNITY_SPAWN_ZONES) {
+  for (const zone of getActiveLevelDesign().pacing.opportunityZones) {
     const zoneShape = new Graphics()
       .rect(
         zone.bounds.left,
@@ -3106,7 +3412,7 @@ async function bootstrap() {
   }
   const pacingDirector = createPacingDirector({
     debug: PACING_DIRECTOR_CONFIG.debug,
-    config: PACING_DIRECTOR_CONFIG,
+    config: getActiveLevelDesign().pacing.director,
     getState: (): PacingState => {
       const currentRegion = getCurrentRegion(player.y);
       const nearbyEggCount = eggSystem
@@ -3132,7 +3438,7 @@ async function bootstrap() {
       const distanceBefore = distance(previousPlayerPosition, base.position);
       const distanceNow = distance(player.position, base.position);
       const playerIntent =
-        depositing || distanceNow < NEST_INTERACTION_RADIUS
+        depositing || distanceNow < getActiveLevelDesign().nest.interactionRadius
           ? "DEPOSITING"
           : carried > 0 && (input.y > 0.05 || distanceNow < distanceBefore)
             ? "RETURNING_HOME"
@@ -3192,7 +3498,7 @@ async function bootstrap() {
           .map((powerUp) => powerUp.type),
         playerIntent,
         activityScore,
-        tutorialActive: activeTutorialTarget !== null,
+        tutorialActive: getActiveTutorialTarget() !== null,
         evolving,
         goldMineState: goldMineSystem.getSnapshot().state,
         goldMineActive: ["ACTIVE", "EXTRACTING", "FINAL_JACKPOT"].includes(
@@ -3221,46 +3527,10 @@ async function bootstrap() {
 
   function chooseGoldMineRespawnPosition(): Point | null {
     const previous = goldMineSystem.getPosition();
-    if (!firstGoldMineSpawned && goldMineTargetRegion) {
-      const bounds = getLogicalRegionBounds(goldMineTargetRegion);
-      const candidates: Point[] = [];
-      for (const verticalOffset of [720, 980, 1240, 1500]) {
-        for (const lateralOffset of [-300, 0, 300]) {
-          const candidate = {
-            x: Math.max(
-              bounds.left + 120,
-              Math.min(bounds.right - 120, player.x + lateralOffset),
-            ),
-            y: Math.max(
-              bounds.top + 120,
-              Math.min(bounds.bottom - 120, player.y - verticalOffset),
-            ),
-          };
-          if (
-            distance(candidate, player.position) >= 520 &&
-            isOffscreenSafeOpportunityPosition(candidate)
-          )
-            candidates.push(candidate);
-        }
-      }
-      if (candidates.length > 0) {
-        const movement = {
-          x: player.x - previousPlayerPosition.x,
-          y: player.y - previousPlayerPosition.y,
-        };
-        return (
-          candidates.sort((a, b) => {
-            const score = (candidate: Point) =>
-              (candidate.x - player.x) * movement.x +
-              (candidate.y - player.y) * movement.y;
-            return score(b) - score(a);
-          })[0] ?? null
-        );
-      }
-      return null;
-    }
-    const topCandidates = GOLD_MINE_CONFIG.spawnLocations.filter((candidate) =>
-      isAllowedLogicalRegion(candidate, LEVEL_DESIGN_CONFIG.goldMineRegions),
+    const eggMineDesign = getActiveLevelDesign().eggMine;
+    const spawnLocations = eggMineDesign.spawnLocations ?? GOLD_MINE_CONFIG.spawnLocations;
+    const topCandidates = spawnLocations.filter((candidate) =>
+      isAllowedLogicalRegion(candidate, eggMineDesign.allowedRegions),
     );
     const strictCandidates = topCandidates.filter(
       (candidate) =>
@@ -3315,13 +3585,15 @@ async function bootstrap() {
     return ranked[0] ?? null;
   }
 
-  function handlePlayerRegionTransition() {
+  function tryUnlockGoldMineForCurrentRegion() {
     const region = getLogicalRegion(player.position);
-    if (region === previousLogicalRegion) return;
-    previousLogicalRegion = region;
+    const eggMineDesign = getActiveLevelDesign().eggMine;
     if (
+      eggMineDesign.enabled &&
       !firstGoldMineSpawned &&
-      LEVEL_DESIGN_CONFIG.goldMineRegions.includes(region) &&
+      (eggMineDesign.firstSpawnLocalEvolution === undefined ||
+        progression.stageIndex >= eggMineDesign.firstSpawnLocalEvolution) &&
+      eggMineDesign.allowedRegions.includes(region) &&
       goldMineSystem.getSnapshot().state === "LOCKED"
     ) {
       goldMineTargetRegion = region;
@@ -3331,6 +3603,13 @@ async function bootstrap() {
         console.debug("[GoldMine] First upper-region trigger", { region });
       }
     }
+  }
+
+  function handlePlayerRegionTransition() {
+    const region = getLogicalRegion(player.position);
+    if (region === previousLogicalRegion) return;
+    previousLogicalRegion = region;
+    tryUnlockGoldMineForCurrentRegion();
   }
 
   function tryRespawnGoldMine() {
@@ -3484,10 +3763,17 @@ async function bootstrap() {
     "KeyK",
     "KeyL",
     "KeyC",
+    "KeyE",
   ]);
   window.addEventListener("keydown", (event) => {
     if (!keyboardCodes.has(event.code)) return;
     event.preventDefault();
+    if (event.code === "KeyE") {
+      // QA shortcut: play the same portal transition used by the game and
+      // activate the next level only when the portal reveal reaches its cue.
+      if (!event.repeat) startWaterWorldTransition();
+      return;
+    }
     if (event.code === "Digit1") {
       spawnDebugSpecialEgg(SpecialEggType.Speed);
       return;
@@ -4066,10 +4352,20 @@ async function bootstrap() {
     sprite: Sprite,
     index: number,
   ) {
-    const isPortal = index >= playerEvolutionFrames.length;
+    const waterWorldActive = levelManager.activeId === "water-world";
+    const localEvolutionCount = progression.stages.length;
+    const isPortal = index === localEvolutionCount;
+    const waterEvolutionIndex = Math.min(
+      Math.max(0, index),
+      waterWorldEvolutionTextures.length - 1,
+    );
     sprite.texture = isPortal
-      ? worldAtlasTextures.portal
-      : playerEvolutionFrames[index];
+      ? waterWorldActive
+        ? lavaWorldPortalTexture
+        : worldAtlasTextures.portal
+      : waterWorldActive
+        ? waterWorldEvolutionTextures[waterEvolutionIndex]
+        : playerEvolutionFrames[Math.min(index, playerEvolutionFrames.length - 1)];
     sprite.scale.set(1);
     sprite.position.set(0, evolutionLayout?.monsterY ?? 0);
   }
@@ -4182,8 +4478,104 @@ async function bootstrap() {
     }
   }
 
+  function startWaterWorldTransition() {
+    if (
+      evolving ||
+      progression.state !== "PORTAL_COMPLETED"
+    ) {
+      return false;
+    }
+    progression.beginTransition();
+    startEvolutionFeedback(progression.stages.length);
+    return true;
+  }
+
+  /** Reset the player-facing and local progression state exactly once when a
+   * real campaign world transition is committed. Scene re-entry and pause /
+   * resume deliberately do not call this function. */
+  function resetForNewWorld(worldId: LevelId) {
+    if (campaignManager.getCurrentWorldId() === worldId) {
+      return;
+    }
+    progression.prepareForNewWorld(getWorldEvolutionConfig(worldId));
+    currency = 0;
+    upgradePoints = 0;
+    upgradeLevels.speed = 0;
+    upgradeLevels.pickupRadius = 0;
+    playerSystem.resetForNewWorld();
+    carried = 0;
+    playerCollected = 0;
+    eggSystem.clear();
+    powerUpManager.reset();
+    depositing = false;
+    depositElapsed = 0;
+    pendingDelivery = null;
+    depositingEggs = [];
+    depositEggOrigins = [];
+    depositArrivals = [];
+    baseVisualDelivered = 0;
+    pendingEvolutionIndex = null;
+    evolutionDelayRemaining = 0;
+    firstClusterDelivered = false;
+    firstGoldMineSpawned = false;
+    goldMineFirstEligibleAt = Number.POSITIVE_INFINITY;
+    lastObservedGoldMineState = "READY";
+    eggMineMarkersRetired = false;
+    eggMineMarkersDismissed = false;
+    eggMineMarkerDismissElapsed = -1;
+    eggMineTutorialShown = false;
+    contextualPowerUpPending = null;
+    contextualPowerUpRequestedAt = Number.NEGATIVE_INFINITY;
+    firstPowerUpDelivered = false;
+    powerUpsDelivered = 0;
+    lastPowerUpDeliveredTime = -Infinity;
+    goldMineUnlockRequested = false;
+    goldMineIntroduced = false;
+    upgradeContactProgress = 0;
+    upgradeStationArmed = true;
+    upgradeStationUnlocked = false;
+    upgradeUnlockRequested = false;
+    upgradeFtueVisible = false;
+    upgradeTutorialStep = 0;
+    upgradeTutorialElapsed = 0;
+    upgradeSpawnElapsed = 0;
+    firstUpgradeCompleted = false;
+    upgradeStation.visible = false;
+    upgradeStation.alpha = 0;
+    upgradeStation.scale.set(1);
+    speedWasActive = false;
+    rangeWasActive = false;
+    orbitWasActive = false;
+    orbitTransitionRemaining = 0;
+    orbitFxStrength = 0;
+    orbitAngle = 0;
+    speedTrailElapsed = 0;
+    speedBurstElapsed = 0;
+    speedBurstStrength = 0;
+    speedParticles.splice(0).forEach((particle) => particle.sprite.destroy());
+    magnetizedEggs.clear();
+    currencyBursts.splice(0).forEach((burst) => burst.sprite.destroy());
+    refreshUpgradeButtons();
+    updateUI();
+  }
+
+  function activateNextCampaignWorld() {
+    // CampaignManager chooses the destination; LevelManager still performs
+    // the actual Scene activation.
+    const nextWorld = campaignManager.getNextWorldId();
+    if (nextWorld !== null && levelManager.activeId !== nextWorld) {
+      levelManager.load(nextWorld);
+      resetForNewWorld(nextWorld);
+      levelManager.activate(nextWorld);
+    } else {
+      progression.completeWorld();
+    }
+    return nextWorld;
+  }
+
   function startEvolutionFeedback(nextIndex: number) {
-    const isNewWorldTransition = nextIndex >= playerEvolutionFrames.length;
+    const isNewWorldTransition = nextIndex === progression.stages.length;
+    if (isNewWorldTransition) campaignWorldTransitionActivated = false;
     evolving = true;
     nestSprite.visible = !isNewWorldTransition;
     input.x = 0;
@@ -4205,14 +4597,17 @@ async function bootstrap() {
     const previousIndex = Math.max(0, nextIndex - 1);
     configureEvolutionSprite(previousEvolutionSprite, previousIndex);
     configureEvolutionSprite(nextEvolutionSprite, nextIndex);
-    previousEvolutionSprite.visible = true;
-    nextEvolutionSprite.visible = false;
+    previousEvolutionSprite.visible = !isNewWorldTransition;
+    nextEvolutionSprite.visible = isNewWorldTransition;
     previousEvolutionSprite.alpha = 1;
     nextEvolutionSprite.alpha = 1;
+    monsterAnimationContainer.alpha = 1;
     monsterAnimationContainer.scale.set(1);
     evolutionVfx.alpha = 0;
+    evolutionVfx.visible = true;
     evolutionVfxAnimationContainer.scale.set(0.8);
     evolutionEnergyRing.alpha = 0;
+    evolutionEnergyRing.visible = true;
     evolutionFlash.alpha = 0;
     evolutionBanner.visible = false;
     evolutionBanner.alpha = 0;
@@ -4222,16 +4617,50 @@ async function bootstrap() {
     evolutionLevel.alpha = 0;
     evolutionLevelPlate.alpha = 0;
     levelAnimationContainer.scale.set(0);
+    const isWaterWorldEvolution =
+      levelManager.activeId === "water-world" &&
+      nextIndex < progression.stages.length;
     evolutionLevel.text = isNewWorldTransition
       ? "New World"
-      : `Level ${evolutionTarget + 1}`;
+      : isWaterWorldEvolution
+        ? `Level ${nextIndex + 1}`
+        : `Level ${evolutionTarget + 1}`;
     const center = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
     evolutionStart = center;
     evolutionFx.position.copyFrom(center);
     evolutionFx.scale.set(1);
     layoutEvolutionPresentation();
     monsterAnimationContainer.scale.set(0.65);
+    if (isNewWorldTransition) {
+      // The portal is the only subject of this transition: keep it exactly
+      // centered, then let the dedicated timeline below grow and fade it.
+      // Keep the portal UI on the current world until the portal reaches the
+      // Water World reveal threshold in the dedicated timeline below.
+      camera.visible = true;
+      waterWorldMarker.visible = false;
+      waterWorldCounter.visible = false;
+      base.visible = false;
+      player.visible = false;
+      eggLayer.visible = false;
+      specialEggLayer.visible = false;
+      fugitiveLayer.visible = false;
+      goldMineLayer.visible = false;
+      upgradeStation.visible = false;
+      evolutionVfx.visible = false;
+      evolutionEnergyRing.visible = false;
+      evolutionLevelPlate.visible = false;
+      evolutionLevel.visible = false;
+      monsterLayoutContainer.position.set(0, 0);
+      evolutionVfxLayoutContainer.position.set(0, 0);
+      evolutionFlash.position.set(0, 0);
+      monsterAnimationContainer.scale.set(0.55);
+    }
     layoutEvolutionPresentation();
+    if (isNewWorldTransition) {
+      monsterLayoutContainer.position.set(0, 0);
+      evolutionVfxLayoutContainer.position.set(0, 0);
+      evolutionFlash.position.set(0, 0);
+    }
     ui.alpha = 1;
     evolutionOverlay.alpha = 0;
     evolutionOverlay.eventMode = "static";
@@ -4251,15 +4680,16 @@ async function bootstrap() {
       return;
     }
     upgradeStationUnlocked = true;
-    if (upgradeTutorialStep === 0) {
+    const waterWorldActive = levelManager.activeId === "water-world";
+    if (!waterWorldActive && upgradeTutorialStep === 0) {
       upgradeTutorialStep = 1;
     }
-    upgradeFtueVisible = true;
+    upgradeFtueVisible = !waterWorldActive;
     upgradeSpawnElapsed = 0;
     upgradeStation.visible = true;
     upgradeStation.scale.set(0.1);
     upgradeStation.alpha = 0;
-    setTutorialTarget("UPGRADE");
+    if (!waterWorldActive) setTutorialTarget("UPGRADE");
     upgradeStationArmed = true;
     sessionTelemetry.record(time, "UPGRADE_INTRODUCED", "MEDIUM");
   }
@@ -4271,6 +4701,35 @@ async function bootstrap() {
       return;
     }
     evolutionElapsed += dt;
+    if (evolutionTarget === progression.stages.length) {
+      const portalGrowth = easeInCubic(remap(evolutionElapsed, 0.04, 1.16));
+      const portalScale = 0.55 + 99.45 * portalGrowth;
+      const portalIntro = remap(evolutionElapsed, 0.04, 0.72);
+      const portalFade = 1 - easeInCubic(remap(evolutionElapsed, 1.16, 1.58));
+      const waterWorldRevealReady = portalScale >= 90;
+      evolutionOverlay.alpha = 0.5 * easeInOutSine(remap(evolutionElapsed, 0, 0.3));
+      ui.alpha = 1 - 0.7 * easeInOutSine(remap(evolutionElapsed, 0, 0.24));
+      monsterAnimationContainer.position.set(0, 0);
+      monsterAnimationContainer.scale.set(portalScale);
+      monsterAnimationContainer.alpha = Math.max(0, portalFade);
+      nextEvolutionSprite.visible = true;
+      previousEvolutionSprite.visible = false;
+      evolutionEnergyRing.position.set(0, 0);
+      evolutionEnergyRing.alpha = 1 - 0.25 * remap(evolutionElapsed, 1.2, 2.7);
+      evolutionEnergyRing
+        .clear()
+        .ellipse(0, 92, 78 + portalIntro * 54, 17 + portalIntro * 10)
+        .stroke({ color: 0xffd44d, alpha: 0.3 + portalIntro * 0.6, width: 3 });
+      if (waterWorldRevealReady && !campaignWorldTransitionActivated) {
+        campaignWorldTransitionActivated = true;
+        camera.visible = true;
+        activateNextCampaignWorld();
+        waterWorldMarker.visible = false;
+        waterWorldCounter.visible = false;
+      }
+      if (evolutionElapsed >= 1.62) finishEvolutionSequence();
+      return;
+    }
     const dimProgress = easeInOutSine(remap(evolutionElapsed, 0, 0.25));
     evolutionOverlay.alpha = 0.5 * dimProgress;
     ui.alpha = 1 - 0.7 * easeInOutSine(remap(evolutionElapsed, 0, 0.2));
@@ -4333,7 +4792,8 @@ async function bootstrap() {
       spawnEvolutionChargeParticles(5);
     }
     if (
-      evolutionTarget < playerEvolutionFrames.length &&
+      (evolutionTarget !== progression.stages.length ||
+        levelManager.activeId === "water-world") &&
       !evolutionRibbonTriggered &&
       evolutionElapsed >= 1.7
     ) {
@@ -4381,22 +4841,38 @@ async function bootstrap() {
     evolutionOverlay.alpha = 0;
     ui.alpha = 1;
     evolving = false;
-    progression.completeEvolution(evolutionTarget);
-    waterWorldCounter.text = `${Math.min(10, progression.stageIndex + 1)}/10`;
-    const enteredWaterWorld = evolutionTarget >= playerEvolutionFrames.length;
-    if (enteredWaterWorld) {
+    const enteredNextWorld = progression.state === "TRANSITIONING";
+    if (!enteredNextWorld) progression.completeEvolution(evolutionTarget);
+    waterWorldCounter.text = `${getWaterWorldEvolutionNumber()}/10`;
+    // The portal timeline activates the Water World before this cleanup runs.
+    // Detect entry from the transition target itself so gameplay layers are
+    // restored after the portal reveal instead of leaving only the terrain.
+    if (enteredNextWorld) {
+      const activeDesign = getActiveLevelDesign();
       portalActivated = true;
       portalActivationElapsed = 0;
       portalActivationFx.visible = true;
-      nestSprite.visible = false;
-      waterWorldMarker.visible = false;
-      waterWorldCounter.visible = false;
+      nestSprite.visible = true;
+      base.visible = true;
+      waterWorldMarker.visible = levelManager.activeId !== "water-world";
+      waterWorldCounter.visible = true;
+      progression.enterActiveWorld();
+      camera.visible = true;
+      player.visible = true;
+      player.position.copyFrom(activeDesign.player.initialPosition);
+      eggLayer.visible = true;
+      specialEggLayer.visible = true;
+      fugitiveLayer.visible = true;
+      goldMineLayer.visible = true;
+      // Upgrade Station keeps its normal visibility rule below: it appears
+      // only when an upgrade is unlocked and the player has enough currency.
+      waterWorldCounter.visible = true;
     }
     sessionTelemetry.record(time, "EVOLUTION", "MACRO", String(evolutionTarget));
     lastEvolutionTime = time;
     redrawPlayer();
     redrawBasePreview();
-    if (enteredWaterWorld) setTutorialTarget("WATER_WORLD");
+    if (enteredNextWorld) setTutorialTarget(null);
     pacingDirector.request("POST_EVOLUTION");
     if (evolutionTarget === 1 && !hideTutorialCompleted) hideTutorialArmed = true;
     if (basePreview.visible) {
@@ -4404,16 +4880,32 @@ async function bootstrap() {
       nestPreviewJuiceElapsed = 0;
       nestPreviewJuiceActive = true;
     }
-    if (evolutionTarget === 2) {
+    if (evolutionTarget === getActiveLevelDesign().fugitive.firstSpawnLocalEvolution) {
       unlockUpgradeStationTutorial();
-      if (!evolution3FugitiveTriggered && !fugitiveSystem.active) {
-        fugitiveSystem.spawn({
-          x: Math.max(PLAYABLE_BOUNDS.left + 120, Math.min(PLAYABLE_BOUNDS.right - 120, player.x + 150)),
-          y: Math.max(PLAYABLE_BOUNDS.top + 160, player.y - 720),
-        });
+      if (
+        getActiveLevelDesign().fugitive.enabled &&
+        !evolution3FugitiveTriggered &&
+        !fugitiveSystem.active
+      ) {
+        fugitiveSystem.spawn(getInitialFugitivePosition());
         evolution3FugitiveTriggered = true;
         sessionTelemetry.record(time, "FUGITIVE_SPAWNED", "MACRO", "EVOLUTION_3");
       }
+    }
+    if (
+      levelManager.activeId === "grass-world" &&
+      evolutionTarget >= 7 &&
+      !grassLevel8FugitivesTriggered &&
+      getActiveLevelDesign().fugitive.enabled
+    ) {
+      fugitiveSystem.spawnBatch(getGrassLevel8FugitivePositions(), {
+        speedBonus: Math.max(0, upgrades.speed - basePlayerSpeed),
+      });
+      grassLevel8FugitivesTriggered = true;
+      sessionTelemetry.record(time, "FUGITIVE_SPAWNED", "MACRO", "GRASS_LEVEL_8");
+    }
+    if (levelManager.activeId === "water-world") {
+      tryUnlockGoldMineForCurrentRegion();
     }
     updateUI();
   }
@@ -4437,11 +4929,178 @@ async function bootstrap() {
     }
   }
 
+  // Re-assert foreground ordering after all static world effects/layers have
+  // been created. Dynamic eggs are inserted below the player and therefore
+  // remain covered by vegetation as well.
+  world.setChildIndex(obstacles, world.children.length - 1);
+
+  function clearSceneOwnedRuntimeState() {
+    // The player, camera, HUD and shared session remain alive. Everything
+    // below is transient state owned by the current world instance.
+    enemySystem.clear();
+    getActiveTutorialSystem().exit();
+    tutorialEnemy = null;
+    tutorialEgg = null;
+    hideTutorialBush = null;
+    directionalArrowTrail.clear();
+    baseIndicator.visible = false;
+    tutorialIndicatorLabel.visible = false;
+    eggSystem.clear();
+    specialEggSystem.clear();
+    fugitiveSystem.clear();
+    fugitiveInterest = null;
+    powerUpManager.reset();
+    pacingDirector.reset();
+    goldMineSystem.debugReset();
+    firstGoldMineSpawned = false;
+    goldMineFirstEligibleAt = Number.POSITIVE_INFINITY;
+    lastObservedGoldMineState = "READY";
+    eggMineMarkersRetired = false;
+    eggMineMarkersDismissed = false;
+    eggMineMarkerDismissElapsed = -1;
+    eggMineTutorialShown = false;
+    contextualPowerUpPending = null;
+    contextualPowerUpRequestedAt = Number.NEGATIVE_INFINITY;
+    normalPowerUpEntities.clear();
+    pendingNormalPowerUpRespawns.clear();
+    postEvolutionOpportunity = null;
+    recentOpportunityZones = [];
+    selectedOpportunityZoneId = null;
+    opportunityZoneRuntime = createZoneRuntime(
+      getActiveLevelDesign().pacing.opportunityZones,
+    );
+    eggRespawnTimer = 0;
+    eggRespawnPending = false;
+    evolution3FugitiveTriggered = false;
+    grassLevel8FugitivesTriggered = false;
+    initialPowerUpsSpawned = false;
+    goldMineTargetRegion = null;
+    goldMineWaveStrength = 0;
+    portalActivated = false;
+    portalActivationFx.visible = false;
+    pendingEvolutionIndex = null;
+    evolutionDelayRemaining = 0;
+    portalActivationElapsed = 0;
+  }
+
+  function enterSceneRuntime() {
+    const design = getActiveLevelDesign();
+    activeLevelDesignId = design.worldId;
+    nestSprite.texture =
+      design.worldId === "water-world"
+        ? waterWorldPlayerNestTexture
+        : grassWorldPlayerNestTexture;
+    base.position.copyFrom(design.nest.position);
+    // Keep the upgrade station close to the active player's Nest in both worlds.
+    upgradeStation.position.set(design.nest.position.x + 300, design.nest.position.y);
+    player.position.copyFrom(design.player.initialPosition);
+    if (restoreSavedSession && restoredWorld && levelManager.activeId === savedGame?.activeWorld) {
+      player.position.set(restoredWorld.player.x, restoredWorld.player.y);
+      currency = restoredWorld.currency;
+      upgradePoints = restoredWorld.upgradePoints;
+      playerCollected = restoredWorld.playerCollected;
+      upgradeLevels.speed = Math.max(0, Math.round((restoredWorld.upgrades.speed - 280) / 45));
+      upgradeLevels.pickupRadius = Math.max(0, Math.round((restoredWorld.upgrades.pickupRadius - 92) / 18));
+      playerSystem.upgrades.speed = restoredWorld.upgrades.speed;
+      playerSystem.upgrades.pickupRadius = restoredWorld.upgrades.pickupRadius;
+      for (let i = 0; i < restoredWorld.carried; i += 1) {
+        const egg = eggSystem.spawnEgg(player.position, progression.stageIndex);
+        eggLayer.removeChild(egg);
+        eggSystem.addCarriedEgg(egg);
+        egg.scale.set(getCarriedEggScale());
+        world.addChildAt(egg, world.getChildIndex(player));
+      }
+      carried = restoredWorld.carried;
+      restoreSavedSession = false;
+    }
+    enemySystem.resetForScene(design.rivals);
+    pacingDirector.reset(design.pacing.director);
+    playerSystem.redraw();
+    getActiveTutorialSystem().enter();
+    setTutorialTarget(getActiveTutorialTarget());
+    spawnInitialPowerUps();
+  }
+
+  const grassRuntime = createSceneRuntime({
+    sceneId: "grass-world",
+    context: sceneContext,
+    design: grassLevel.design,
+    evolution: getWorldEvolutionConfig("grass-world"),
+    dependencies: {
+      initialize: () => grassTutorialSystem.initialize(),
+      enter: enterSceneRuntime,
+      update: (dt) => grassTutorialSystem.update(dt),
+      pause: () => grassTutorialSystem.pause(),
+      resume: () => grassTutorialSystem.resume(),
+      exit: clearSceneOwnedRuntimeState,
+      dispose: () => grassTutorialSystem.dispose(),
+    },
+  });
+  const waterRuntime = createSceneRuntime({
+    sceneId: "water-world",
+    context: sceneContext,
+    design: waterLevel.design,
+    evolution: getWorldEvolutionConfig("water-world"),
+    dependencies: {
+      initialize: () => waterTutorialSystem.initialize(),
+      enter: enterSceneRuntime,
+      update: (dt) => waterTutorialSystem.update(dt),
+      pause: () => waterTutorialSystem.pause(),
+      resume: () => waterTutorialSystem.resume(),
+      exit: clearSceneOwnedRuntimeState,
+      dispose: () => waterTutorialSystem.dispose(),
+    },
+  });
+  levelManager.attachRuntime("grass-world", grassRuntime);
+  levelManager.attachRuntime("water-world", waterRuntime);
+
+  function saveProgress() {
+    const activeWorld = levelManager.activeId;
+    const world = activeWorld ? getWorldEvolutionConfig(activeWorld).worldId : null;
+    if (!activeWorld || !world) return;
+    saveGameState({
+      version: 1,
+      activeWorld,
+      completedWorlds: [...session.campaign.completedWorlds],
+      worlds: {
+        [activeWorld]: {
+          delivered: progression.delivered,
+          globalDelivered: progression.globalDelivered,
+          stageIndex: progression.stageIndex,
+          progressionState: progression.state,
+          player: { x: player.x, y: player.y },
+          carried,
+          playerCollected,
+          currency,
+          upgradePoints,
+          upgrades: {
+            speed: playerSystem.upgrades.speed,
+            pickupRadius: playerSystem.upgrades.pickupRadius,
+          },
+        },
+      },
+    });
+  }
+
+  let saveElapsed = 0;
+  window.addEventListener("pagehide", saveProgress);
+  window.addEventListener("beforeunload", saveProgress);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") saveProgress();
+  });
+
   app.ticker.add((ticker) => {
     const dt = ticker.deltaMS / 1000;
+    levelManager.update(dt);
+    if (!evolving) syncActiveLevelDesign();
     updateUpgradeTutorialHand(dt);
     if (upgradeMenuOpen || sdkAdPlaying) return;
     time += dt;
+    saveElapsed += dt;
+    if (saveElapsed >= 0.75) {
+      saveElapsed = 0;
+      saveProgress();
+    }
     if (portalActivated) {
       portalActivationElapsed += dt;
       const pulse = (Math.sin(portalActivationElapsed * 3.2) + 1) * 0.5;
@@ -4479,6 +5138,7 @@ async function bootstrap() {
       eggMineMarkersRetired = true;
     }
     eggMineMarkers.visible =
+      levelManager.activeId === "grass-world" &&
       !eggMineMarkersRetired &&
       !eggMineMarkersDismissed &&
       upgradeStationUnlocked;
@@ -4523,18 +5183,12 @@ async function bootstrap() {
       }
     }
     if (
-      activeTutorialTarget === "GOLD_MINE" &&
+      getActiveTutorialTarget() === "GOLD_MINE" &&
       goldMineSnapshot.state !== "LOCKED" &&
       distance(player.position, goldMineSnapshot.position) <=
         GOLD_MINE_CONFIG.activationRadius
     ) {
       clearTutorialTarget("GOLD_MINE");
-    }
-    if (
-      activeTutorialTarget === "WATER_WORLD" &&
-      distance(player.position, base.position) <= 180
-    ) {
-      clearTutorialTarget("WATER_WORLD");
     }
     if (
       goldMineSnapshot.state === "ACTIVE" &&
@@ -4587,11 +5241,11 @@ async function bootstrap() {
           ? 0.78
           : 1;
       orbitAngle += SPECIAL_EGG_CONFIG.orbit.orbitSpeed * orbitSpeedFactor * dt;
-      const cloudPosition = getCloudWorldPosition();
-      orbitCenter.x += (cloudPosition.x - orbitCenter.x) * Math.min(1, dt * 18);
-      orbitCenter.y += (cloudPosition.y - orbitCenter.y) * Math.min(1, dt * 18);
+      const orbitPosition = getOrbitCenterWorldPosition();
+      orbitCenter.x += (orbitPosition.x - orbitCenter.x) * Math.min(1, dt * 18);
+      orbitCenter.y += (orbitPosition.y - orbitCenter.y) * Math.min(1, dt * 18);
     } else {
-      orbitCenter = getCloudWorldPosition();
+      orbitCenter = getOrbitCenterWorldPosition();
     }
     const orbitFollowRate = orbitLayoutActive ? 8 : 12;
     orbitFxStrength = Math.max(
@@ -4602,7 +5256,7 @@ async function bootstrap() {
     orbitFx.clear();
     if (orbitLayoutActive || orbitFxStrength > 0) {
       const orbitRadius =
-        45 * getCurrentVisualScale() +
+        45 * getCurrentEggVisualScale() +
         28 +
         SPECIAL_EGG_CONFIG.orbit.orbitPadding +
         18;
@@ -4632,11 +5286,11 @@ async function bootstrap() {
         upgradeLevels.pickupRadius * UPGRADE_CONFIG.costStep,
     );
     const upgradeAvailable = currency >= cheapestUpgrade;
-    if (firstUpgradeCompleted) {
+    if (upgradeStationUnlocked) {
       if (!upgradeMenuOpen) {
         upgradeStation.visible = upgradeAvailable;
       }
-      upgradeFtueVisible = upgradeAvailable;
+      upgradeFtueVisible = upgradeAvailable && levelManager.activeId !== "water-world";
     }
     if (upgradeFtueVisible) {
       if (upgradeSpawnElapsed >= 0.8) {
@@ -4671,7 +5325,7 @@ async function bootstrap() {
     }
     updateEggPickupFeedback(dt);
     updateDepositFeedback(dt);
-    if (activeTutorialTarget === "BUSH") {
+    if (getActiveTutorialTarget() === "BUSH") {
       hideTutorialBush = getNearestBush();
     }
     const hiddenNow = getBushCover(player.position) >= 0.5;
@@ -4682,7 +5336,7 @@ async function bootstrap() {
       animateCarriedEggsForBush(playerHidden);
       if (
         playerHidden &&
-        activeTutorialTarget === "BUSH" &&
+        getActiveTutorialTarget() === "BUSH" &&
         hideTutorialBush &&
         distance(player.position, {
           x: hideTutorialBush.x,
@@ -4697,7 +5351,7 @@ async function bootstrap() {
         !playerHidden &&
         hideTutorialCompleted &&
         !magnetTutorialShown &&
-        activeTutorialTarget === null &&
+        getActiveTutorialTarget() === null &&
         normalPowerUpEntities.get(SpecialEggType.Magnet)?.container.visible
       ) {
         magnetTutorialShown = true;
@@ -4757,7 +5411,12 @@ async function bootstrap() {
         ui.setChildIndex(upgradeCurrencyHud, ui.children.length - 1);
         // Safety net for the normal station flow: the first panel opening
         // always starts the visual tutorial on the left upgrade card.
-        if (upgradeTutorialStep === 0) upgradeTutorialStep = 1;
+        if (
+          levelManager.activeId !== "water-world" &&
+          upgradeTutorialStep === 0
+        ) {
+          upgradeTutorialStep = 1;
+        }
         refreshUpgradeButtons();
         refreshUpgradeTutorialHand();
       }
@@ -4786,7 +5445,7 @@ async function bootstrap() {
         beginEggPickupFeedback(egg);
         carried += 1;
         stackVisualController.onEggCollected(carried);
-        if (activeTutorialTarget === "EGG") {
+        if (getActiveTutorialTarget() === "EGG") {
           tutorialEggsCollected += 1;
           if (tutorialEggsCollected < 2) {
             tutorialEgg = findNearestTutorialEgg(egg);
@@ -4820,7 +5479,7 @@ async function bootstrap() {
         if (specialEggSystem.collect(specialEgg)) {
           if (
             specialEgg.type === SpecialEggType.Magnet &&
-            activeTutorialTarget === "MAGNET"
+            getActiveTutorialTarget() === "MAGNET"
           ) {
             clearTutorialTarget("MAGNET");
           }
@@ -4881,7 +5540,7 @@ async function bootstrap() {
       hideTutorialArmed &&
       !hideTutorialCompleted &&
       carried >= 2 &&
-      activeTutorialTarget === null &&
+      getActiveTutorialTarget() === null &&
       !upgradeMenuOpen
     ) {
       hideTutorialArmed = false;
@@ -4923,10 +5582,14 @@ async function bootstrap() {
                 distance(b.container.position, player.position),
             )[0] ?? null)
         : null;
-    // Opening state: the red rival always chases the player from the start.
-    // After the intro is completed, control returns to the regular rival AI.
+    // The opening chase is a Grass World introduction only. Water World
+    // starts with its rivals using the regular free-roaming AI.
+    const openingChaseAllowed = levelManager.activeId === "grass-world";
     const introChaseActive =
-      rivalsActive && !redIntroChaseCompleted && time >= enemies[0].dazedUntil;
+      openingChaseAllowed &&
+      rivalsActive &&
+      !redIntroChaseCompleted &&
+      time >= enemies[0].dazedUntil;
     const activeChaser = introChaseActive
       ? enemies[0]
       : normalChaser &&
@@ -4973,7 +5636,12 @@ async function bootstrap() {
     }
     if (!goldMineActive && eggRespawnPending) {
       eggRespawnTimer = Math.max(0, eggRespawnTimer - dt);
-      if (eggRespawnTimer <= 0 && eggSystem.spawnDirectorEgg(bushes)) {
+      if (
+        eggRespawnTimer <= 0 &&
+        eggSystem.spawnDirectorEgg(
+          getActiveBushes(),
+        )
+      ) {
         eggRespawnPending = false;
         if (eggSystem.countActiveWorldEggs() < eggSystem.activeTarget)
           eggRespawnPending = true;
@@ -4982,7 +5650,7 @@ async function bootstrap() {
     }
     if (!depositing && rivalsActive && !playerHidden) {
       const recoveredEnemyEgg = enemySystem.resolveStealing();
-      if (recoveredEnemyEgg && activeTutorialTarget === "ENEMY") {
+      if (recoveredEnemyEgg && getActiveTutorialTarget() === "ENEMY") {
         tutorialEnemy = null;
         setTutorialTarget("NEST");
       }
@@ -4996,7 +5664,7 @@ async function bootstrap() {
     }
     if (
       !depositing &&
-      distance(player.position, base.position) < NEST_INTERACTION_RADIUS &&
+      distance(player.position, base.position) < getActiveLevelDesign().nest.interactionRadius &&
       carried > 0
     ) {
       depositing = true;
@@ -5101,12 +5769,19 @@ async function bootstrap() {
         depositEggOrigins = [];
         depositArrivals = [];
         depositing = false;
-        if (delivery.shouldEvolve) {
+        if (delivery.portalReady && progression.completePortal()) {
+          // Deposit completion, not portal reveal, completes the current world.
+          // The transition is queued once and cannot be duplicated by input.
+          campaignManager.completeCurrentWorld();
+          progression.beginTransition();
+          pendingPortalTransition = true;
+          evolutionDelayRemaining = DEPOSIT_FEEDBACK.evolutionDelay;
+        } else if (delivery.shouldEvolve) {
           pendingEvolutionIndex = delivery.unlockedIndex;
           evolutionDelayRemaining = DEPOSIT_FEEDBACK.evolutionDelay;
         } else {
           progression.completeEvolution(delivery.unlockedIndex);
-          waterWorldCounter.text = `${Math.min(10, progression.stageIndex + 1)}/10`;
+          waterWorldCounter.text = `${getWaterWorldEvolutionNumber()}/10`;
           redrawPlayer();
           redrawBasePreview();
           updateUI();
@@ -5115,7 +5790,14 @@ async function bootstrap() {
         updateUI();
       }
     }
-    if (!depositing && pendingEvolutionIndex !== null) {
+    if (!depositing && pendingPortalTransition) {
+      evolutionDelayRemaining -= dt;
+      if (evolutionDelayRemaining <= 0) {
+        pendingPortalTransition = false;
+        startEvolutionFeedback(progression.stages.length);
+      }
+    }
+    if (!depositing && !pendingPortalTransition && pendingEvolutionIndex !== null) {
       evolutionDelayRemaining -= dt;
       if (evolutionDelayRemaining <= 0) {
         const nextEvolutionIndex = pendingEvolutionIndex;
@@ -5202,7 +5884,7 @@ async function bootstrap() {
         // The cloud is the visual ground/depth line of the character. Keep
         // upper orbiting eggs behind the whole player container and lower
         // eggs in front of it, so the sprite really occludes the rear eggs.
-        const depthLineY = getCloudWorldPosition().y;
+        const depthLineY = getOrbitCenterWorldPosition().y;
         const behindPlayer = eggSystem.carriedEggs.filter(
           (egg) => egg.parent === world && egg.y < depthLineY,
         );
@@ -5358,7 +6040,7 @@ async function bootstrap() {
       }
     }
     if (
-      activeTutorialTarget === "EGG" &&
+      getActiveTutorialTarget() === "EGG" &&
       (!tutorialEgg || !tutorialEgg.visible || tutorialEgg.parent !== eggLayer)
     ) {
       tutorialEgg = findNearestTutorialEgg();
@@ -5373,30 +6055,32 @@ async function bootstrap() {
     nestOffscreenElapsed = baseOnScreen ? 0 : nestOffscreenElapsed + dt;
     const showNestNavigation = nestOffscreenElapsed >= 15;
     const nestIndicatorActive =
-      activeTutorialTarget === "NEST" ||
-      (activeTutorialTarget === null && showNestNavigation);
+      getActiveTutorialTarget() === "NEST" ||
+      (getActiveTutorialTarget() === null && showNestNavigation);
     if (nestIndicatorActive && !nestGuidanceWasActive) {
       nestGuidanceActivationCount += 1;
     }
     nestGuidanceWasActive = nestIndicatorActive;
     const useLegacyNestIndicator =
-      nestIndicatorActive && nestGuidanceActivationCount >= 2;
+      nestIndicatorActive &&
+      (levelManager.activeId === "water-world" ||
+        nestGuidanceActivationCount >= 2);
     const tutorialWorldTarget = nestIndicatorActive
       ? base.position
-      : activeTutorialTarget === "EGG" && tutorialEgg
+      : getActiveTutorialTarget() === "EGG" && tutorialEgg
         ? tutorialEgg.position
-        : activeTutorialTarget === "UPGRADE"
+        : getActiveTutorialTarget() === "UPGRADE"
           ? upgradeStation.position
-          : activeTutorialTarget === "ENEMY" && tutorialEnemy
+          : getActiveTutorialTarget() === "ENEMY" && tutorialEnemy
             ? tutorialEnemy.container.position
-              : activeTutorialTarget === "BUSH" && hideTutorialBush
+              : getActiveTutorialTarget() === "BUSH" && hideTutorialBush
                 ? {
                     x: hideTutorialBush.x,
                     y: hideTutorialBush.y - hideTutorialBush.height * 0.44,
                   }
-                : activeTutorialTarget === "GOLD_MINE"
+                : getActiveTutorialTarget() === "GOLD_MINE"
                   ? goldMineSystem.getPosition()
-                : activeTutorialTarget === "MAGNET"
+                : getActiveTutorialTarget() === "MAGNET"
                   ? (() => {
                       const magnetEntity = normalPowerUpEntities.get(
                         SpecialEggType.Magnet,
@@ -5408,20 +6092,18 @@ async function bootstrap() {
                           }
                         : null;
                     })()
-                  : activeTutorialTarget === "WATER_WORLD"
-                    ? base.position
                   : null;
     const targetScreen = tutorialWorldTarget
       ? world.toGlobal(tutorialWorldTarget)
       : baseScreen;
     // The upgrade target indicator must never render over the upgrade screen.
     const hasIndicator =
-      !upgradeMenuOpen && (Boolean(activeTutorialTarget) || showNestNavigation);
+      !upgradeMenuOpen && (Boolean(getActiveTutorialTarget()) || showNestNavigation);
     directionalArrowTrail.update(
       {
         visible: hasIndicator && !useLegacyNestIndicator,
         target: tutorialWorldTarget,
-        type: nestIndicatorActive ? "NEST" : activeTutorialTarget,
+        type: nestIndicatorActive ? "NEST" : getActiveTutorialTarget(),
       },
       player.position.x,
       player.position.y,
@@ -5431,7 +6113,7 @@ async function bootstrap() {
     baseArrow.visible = useLegacyNestIndicator;
     baseIndicatorText.visible = nestIndicatorActive;
     tutorialIndicatorLabel.visible =
-      Boolean(activeTutorialTarget) && activeTutorialTarget !== "NEST";
+      Boolean(getActiveTutorialTarget()) && getActiveTutorialTarget() !== "NEST";
     if (hasIndicator) {
       const centerX = window.innerWidth / 2;
       const centerY = window.innerHeight / 2;

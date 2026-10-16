@@ -146,6 +146,18 @@ export class DirectionalArrowTrail {
     }
   }
 
+  /** Immediately invalidates a target when its Scene exits. */
+  clear() {
+    this.visualAlpha = 0;
+    this.lastTargetX = Number.NaN;
+    this.lastTargetY = Number.NaN;
+    this.lastTargetType = null;
+    for (const arrow of this.arrows) {
+      arrow.visible = false;
+      arrow.alpha = 0;
+    }
+  }
+
   private getArrowCount(distance: number) {
     if (distance < DIRECTIONAL_ARROW_TRAIL.MIN_DISTANCE) return 0;
     for (const threshold of ARROW_COUNTS) {

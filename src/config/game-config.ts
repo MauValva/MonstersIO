@@ -35,8 +35,18 @@ export const STAGES = [
   { name: "Celestial", threshold: 122, color: 0xff82d5, scale: 2.04 },
   { name: "Ancient", threshold: 153, color: 0xd7a7ff, scale: 2.18 },
   { name: "Apex", threshold: 188, color: 0xffe27a, scale: 2.32 },
-  // The portal is the eleventh collection entry and is previewed at the nest.
-  { name: "Water World", threshold: 230, color: 0x63d8ff, scale: 2.42 },
+  // Water World starts at the portal threshold. The portal entry itself uses
+  // Water World evolution 1, followed by nine independent evolutions.
+  { name: "Water World 1", threshold: 230, color: 0x63d8ff, scale: 2.42 },
+  { name: "Water World 2", threshold: 234, color: 0x72e4ff, scale: 2.5 },
+  { name: "Water World 3", threshold: 246, color: 0x5dd4ff, scale: 2.58 },
+  { name: "Water World 4", threshold: 260, color: 0x68c8ff, scale: 2.66 },
+  { name: "Water World 5", threshold: 278, color: 0x87bfff, scale: 2.74 },
+  { name: "Water World 6", threshold: 299, color: 0x8cecff, scale: 2.82 },
+  { name: "Water World 7", threshold: 324, color: 0x6ee7d8, scale: 2.9 },
+  { name: "Water World 8", threshold: 352, color: 0x79d6ff, scale: 2.98 },
+  { name: "Water World 9", threshold: 383, color: 0x9fc8ff, scale: 3.06 },
+  { name: "Water World 10", threshold: 418, color: 0xa8f0ff, scale: 3.14 },
 ] as const;
 
 export const getStageVisualScale = (stageIndex: number) =>
@@ -111,6 +121,12 @@ export const POST_FIRST_EVOLUTION_EGG_POSITIONS: Point[] = [
   { x: 3500, y: 1800 },
 ];
 
+export type EggSpawnZone = {
+  name: string;
+  bounds: { left: number; right: number; top: number; bottom: number };
+  target: number;
+};
+
 export const GOLD_MINE_CONFIG = {
   initiallyLocked: true,
   minUnlockTime: 60,
@@ -119,11 +135,10 @@ export const GOLD_MINE_CONFIG = {
   firstSpawnDelayMax: 18,
   center: { x: 3100, y: -3100 },
   spawnLocations: [
-    { x: 3100, y: -3100 },
-    { x: 1500, y: -3000 },
-    { x: 4700, y: -3000 },
-    { x: 2200, y: -1850 },
-    { x: 4000, y: -1850 },
+    { x: 850, y: -3000 },
+    { x: 5350, y: -3000 },
+    { x: 850, y: 3000 },
+    { x: 5350, y: 3000 },
   ],
   activationRadius: 250,
   activeRadius: 310,

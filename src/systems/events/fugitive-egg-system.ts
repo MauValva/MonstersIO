@@ -22,6 +22,10 @@ export type FugitiveEventSnapshot = {
   closestDistance: number;
 };
 
+export type FugitiveSpawnOptions = {
+  speedBonus?: number;
+};
+
 export function createFugitiveEggSystem(deps: {
   layer: Container;
   texture: Texture;
@@ -31,7 +35,7 @@ export function createFugitiveEggSystem(deps: {
   onEscape: (position: Point) => void;
   debug?: boolean;
 }) {
-  let event: {
+  type FugitiveEvent = {
     container: Container;
     egg: Sprite;
     alertText: Text;
@@ -43,7 +47,9 @@ export function createFugitiveEggSystem(deps: {
     direction: Point;
     phase: number;
     trailElapsed: number;
-  } | null = null;
+    speedBonus: number;
+  };
+  let events: FugitiveEvent[] = [];
   type TrailParticle = {
     sprite: Graphics;
     vx: number;
@@ -58,14 +64,13 @@ export function createFugitiveEggSystem(deps: {
     trailParticles.length = 0;
   }
 
-  function setState(next: FugitiveState) {
-    if (!event || event.state === next) return;
+  function setState(event: FugitiveEvent, next: FugitiveState) {
+    if (event.state === next) return;
     event.state = next;
     if (deps.debug) console.debug("[FUGITIVE] State", next);
   }
 
-  function spawn(position: Point) {
-    clear();
+  function createEvent(position: Point, options: FugitiveSpawnOptions = {}) {
     const container = new Container();
     container.position.set(
       Math.max(PLAYABLE_BOUNDS.left + 80, Math.min(PLAYABLE_BOUNDS.right - 80, position.x)),
@@ -85,7 +90,7 @@ export function createFugitiveEggSystem(deps: {
     alertText.visible = false;
     container.addChild(glow, egg, alertText);
     deps.layer.addChild(container);
-    event = {
+    const event: FugitiveEvent = {
       container,
       egg,
       alertText,
@@ -97,20 +102,32 @@ export function createFugitiveEggSystem(deps: {
       direction: { x: 0, y: -1 },
       phase: Math.random() * Math.PI * 2,
       trailElapsed: 0,
+      speedBonus: Math.max(0, options.speedBonus ?? 0),
     };
     if (deps.debug) console.debug("[FUGITIVE] Spawned", { position });
-    return container;
+    return event;
   }
 
-  function finish(next: "CAPTURE" | "ESCAPED") {
-    if (!event) return;
+  function spawn(position: Point, options?: FugitiveSpawnOptions) {
+    clear();
+    const event = createEvent(position, options);
+    events = [event];
+    return event.container;
+  }
+
+  function spawnBatch(positions: Point[], options?: FugitiveSpawnOptions) {
+    clear();
+    events = positions.map((position) => createEvent(position, options));
+    return events.map((event) => event.container);
+  }
+
+  function finish(event: FugitiveEvent, next: "CAPTURE" | "ESCAPED") {
     const position = { x: event.container.x, y: event.container.y };
-    setState(next);
+    setState(event, next);
     if (next === "CAPTURE") deps.onCapture(position);
     else deps.onEscape(position);
-    clearTrailParticles();
     event.container.destroy({ children: true });
-    event = null;
+    events = events.filter((candidate) => candidate !== event);
   }
 
   function update(dt: number, time: number) {
@@ -126,64 +143,65 @@ export function createFugitiveEggSystem(deps: {
         trailParticles.splice(i, 1);
       }
     }
-    if (!event) return;
-    event.elapsed += dt;
+    if (events.length === 0) return;
     const player = deps.getPlayerPosition();
-    const dx = player.x - event.container.x;
-    const dy = player.y - event.container.y;
-    const distance = Math.hypot(dx, dy);
-    event.closestDistance = Math.min(event.closestDistance, distance);
-    event.container.rotation = Math.sin(time * 2.4 + event.phase) * 0.06;
-    event.egg.scale.set(1 + Math.sin(time * 8 + event.phase) * (event.state === "NEAR_CAPTURE" ? 0.1 : 0.045));
-    event.alertText.visible = event.state === "ALERT" || event.state === "NEAR_CAPTURE";
-    event.alertText.text = event.state === "NEAR_CAPTURE" ? "!" : "?";
+    for (const event of [...events]) {
+      event.elapsed += dt;
+      const dx = player.x - event.container.x;
+      const dy = player.y - event.container.y;
+      const distance = Math.hypot(dx, dy);
+      event.closestDistance = Math.min(event.closestDistance, distance);
+      event.container.rotation = Math.sin(time * 2.4 + event.phase) * 0.06;
+      event.egg.scale.set(1 + Math.sin(time * 8 + event.phase) * (event.state === "NEAR_CAPTURE" ? 0.1 : 0.045));
+      event.alertText.visible = event.state === "ALERT" || event.state === "NEAR_CAPTURE";
+      event.alertText.text = event.state === "NEAR_CAPTURE" ? "!" : "?";
 
     // Contact is valid as soon as the player reaches the Fugitive. The alert
     // pause must never make a direct touch feel non-responsive.
     if (distance <= FUGITIVE_EGG_CONFIG.captureRadius) {
-      finish("CAPTURE");
-      return;
+        finish(event, "CAPTURE");
+        continue;
     }
 
     if (event.state === "DORMANT") {
-      event.container.y += Math.sin(time * 3 + event.phase) * dt * 5;
-      if (distance <= FUGITIVE_EGG_CONFIG.alertRadius) {
-        setState("ALERT");
-        event.elapsed = 0;
+        event.container.y += Math.sin(time * 3 + event.phase) * dt * 5;
+        if (distance <= FUGITIVE_EGG_CONFIG.alertRadius) {
+          setState(event, "ALERT");
+          event.elapsed = 0;
+        }
+        continue;
       }
-      return;
-    }
-    if (event.state === "ALERT") {
-      event.container.y -= dt * 18;
-      if (event.elapsed >= FUGITIVE_EGG_CONFIG.alertDelay) {
-        setState("CHASE");
-        event.elapsed = 0;
+      if (event.state === "ALERT") {
+        event.container.y -= dt * 18;
+        if (event.elapsed >= FUGITIVE_EGG_CONFIG.alertDelay) {
+          setState(event, "CHASE");
+          event.elapsed = 0;
+        }
+        continue;
       }
-      return;
-    }
-    if (event.state !== "CHASE" && event.state !== "NEAR_CAPTURE") return;
-    event.chaseElapsed += dt;
-    event.trailElapsed += dt;
-    if (event.trailElapsed >= FUGITIVE_EGG_CONFIG.trailInterval) {
-      event.trailElapsed = 0;
-      const color = FUGITIVE_RAINBOW_COLORS[
-        Math.floor(event.chaseElapsed / FUGITIVE_EGG_CONFIG.trailInterval) % FUGITIVE_RAINBOW_COLORS.length
-      ];
-      const particle = new Graphics()
-        .circle(0, 0, 7.5 + Math.random() * 4.5)
-        .fill({ color, alpha: 0.96 });
-      particle.position.set(event.container.x, event.container.y + 4);
-      deps.layer.addChildAt(particle, Math.max(0, deps.layer.children.indexOf(event.container)));
-      trailParticles.push({
-        sprite: particle,
-        vx: -event.direction.x * 38,
-        vy: -event.direction.y * 38,
-        life: FUGITIVE_EGG_CONFIG.trailLife,
-        maxLife: FUGITIVE_EGG_CONFIG.trailLife,
-      });
-    }
-    if (distance <= FUGITIVE_EGG_CONFIG.nearCaptureDistance) setState("NEAR_CAPTURE");
-    else setState("CHASE");
+      if (event.state !== "CHASE" && event.state !== "NEAR_CAPTURE") continue;
+      event.chaseElapsed += dt;
+      event.trailElapsed += dt;
+      if (event.trailElapsed >= FUGITIVE_EGG_CONFIG.trailInterval) {
+        event.trailElapsed = 0;
+        const color = FUGITIVE_RAINBOW_COLORS[
+          Math.floor(event.chaseElapsed / FUGITIVE_EGG_CONFIG.trailInterval) % FUGITIVE_RAINBOW_COLORS.length
+        ];
+        const particle = new Graphics()
+          .circle(0, 0, 7.5 + Math.random() * 4.5)
+          .fill({ color, alpha: 0.96 });
+        particle.position.set(event.container.x, event.container.y + 4);
+        deps.layer.addChildAt(particle, Math.max(0, deps.layer.children.indexOf(event.container)));
+        trailParticles.push({
+          sprite: particle,
+          vx: -event.direction.x * 38,
+          vy: -event.direction.y * 38,
+          life: FUGITIVE_EGG_CONFIG.trailLife,
+          maxLife: FUGITIVE_EGG_CONFIG.trailLife,
+        });
+      }
+      if (distance <= FUGITIVE_EGG_CONFIG.nearCaptureDistance) setState(event, "NEAR_CAPTURE");
+      else setState(event, "CHASE");
     // Temporary test mode: keep the Fugitive active until capture.
     // Re-enable this block when the escape lifecycle is ready to be tested:
     // if (distance > FUGITIVE_EGG_CONFIG.abandonDistance) event.abandonElapsed += dt;
@@ -196,7 +214,7 @@ export function createFugitiveEggSystem(deps: {
     //   return;
     // }
 
-    const length = distance || 1;
+      const length = distance || 1;
     const awayX = -dx / length;
     const awayY = -dy / length;
     const forwardX = 0;
@@ -220,20 +238,22 @@ export function createFugitiveEggSystem(deps: {
       distanceFactor > 0
         ? FUGITIVE_EGG_CONFIG.nearPlayerSpeedMultiplier
         : FUGITIVE_EGG_CONFIG.farPlayerSpeedMultiplier
-    );
+    ) + event.speedBonus;
     const playerSpeed = deps.getPlayerSpeed();
-    const cappedSpeed = Math.min(speed, Math.max(180, playerSpeed * 0.92));
+    const cappedSpeed = Math.min(speed, Math.max(180, playerSpeed * 0.92) + event.speedBonus);
     event.container.x = Math.max(PLAYABLE_BOUNDS.left + 45, Math.min(PLAYABLE_BOUNDS.right - 45, event.container.x + event.direction.x * cappedSpeed * dt));
-    event.container.y = Math.max(PLAYABLE_BOUNDS.top + 45, Math.min(PLAYABLE_BOUNDS.bottom - 45, event.container.y + event.direction.y * cappedSpeed * dt));
+      event.container.y = Math.max(PLAYABLE_BOUNDS.top + 45, Math.min(PLAYABLE_BOUNDS.bottom - 45, event.container.y + event.direction.y * cappedSpeed * dt));
+    }
   }
 
   function clear() {
     clearTrailParticles();
-    event?.container.destroy({ children: true });
-    event = null;
+    for (const event of events) event.container.destroy({ children: true });
+    events = [];
   }
 
   function getSnapshot(): FugitiveEventSnapshot | null {
+    const event = events[0];
     if (!event) return null;
     const player = deps.getPlayerPosition();
     return {
@@ -245,5 +265,5 @@ export function createFugitiveEggSystem(deps: {
     };
   }
 
-  return { spawn, update, clear, getSnapshot, get active() { return event !== null; } };
+  return { spawn, spawnBatch, update, clear, getSnapshot, get active() { return events.length > 0; } };
 }
